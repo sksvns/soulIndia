@@ -18,6 +18,11 @@ docker compose up --build
   Celery broker)
 - Django admin: http://localhost/admin/
 
+The `backend` (gunicorn) container auto-reloads on code changes. The
+`celery` worker does not -- restart it after changing any `apps.ingestion`
+task/pipeline code, or a stale worker process will keep running old logic:
+`docker compose restart celery`.
+
 ## Repository layout
 
 ```
