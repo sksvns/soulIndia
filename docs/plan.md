@@ -415,6 +415,31 @@ frozen Phase 1 stack, not something to add silently mid-feature.
 
 ## Day 7 — Materialized views + analytics read-path
 
+**Status:** ✅ Done (2026-07-06). All three MVs group by dim_calendar's
+*computed* financial_year/month_no/quarter (not the brand's raw supplied
+text, which stays in fact_sales.extra for audit) -- consistent across every
+brand, never null, exactly matching the Day 4 attribute_registry seeding.
+discount_pct and a precomputed discount_bucket are both computed in the MV
+layer, never stored on fact_sales, per the frozen rule. Analytics read-path
+is raw SQL only (ORDER BY column validated against an allowlist, never
+string-interpolated from request input). Redis cache-aside uses per-brand
+version counters for busting (O(1), no SCAN) wired directly into
+`process_upload_batch` -- every successful load now refreshes all 3 MVs
+`CONCURRENTLY` and busts that brand's cache automatically, closing the
+TODO left in Day 6. 117/117 tests pass.
+
+**Real-data verified, not just fixtures:** re-loaded the complete real Pepe
+file (16,369 rows) through the actual HTTP API and confirmed the dashboard
+endpoint's total net_value matches Day 6's independently-verified real total
+(35,197,789.68) exactly; confirmed a warm second call is served from cache;
+spot-checked top-10 stores/categories against real, plausible numbers.
+
+**Caught one real test-isolation gap while building this:** Redis is a real
+shared external service, not reset between tests the way pytest-django
+resets Postgres per test via transaction rollback -- a cached value from one
+test was silently visible to the next. Fixed with an autouse fixture that
+clears the cache before/after every test.
+
 **Goals:** fast, correct aggregate APIs.
 
 **Tasks**
