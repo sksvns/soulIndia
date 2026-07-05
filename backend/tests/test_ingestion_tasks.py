@@ -1,4 +1,5 @@
 from io import StringIO
+from unittest.mock import patch
 
 import pytest
 from django.core.management import call_command
@@ -83,3 +84,25 @@ def test_process_upload_batch_on_a_bad_file_creates_no_dimension_rows(
 
     assert not DimStore.objects.filter(brand=brand).exists()
     assert not DimProduct.objects.filter(brand=brand).exists()
+
+
+@pytest.mark.django_db
+def test_process_upload_batch_never_gets_silently_stuck_on_an_unexpected_error(
+    killer_brand_and_config, data_inserter_user
+):
+    """A storage outage, a DB error, a bug -- anything unexpected must still
+    leave the batch visibly "failed" with a reason, not stuck mid-pipeline
+    forever with no explanation."""
+    brand, config = killer_brand_and_config
+    batch = _upload_and_create_batch(
+        brand, config, data_inserter_user, killer_workbook(KILLER_GOOD_ROWS), "april.xlsx"
+    )
+
+    with patch("apps.ingestion.tasks.run_pipeline", side_effect=RuntimeError("boom: disk on fire")):
+        with pytest.raises(RuntimeError):
+            process_upload_batch(batch.batch_id)
+
+    batch.refresh_from_db()
+    assert batch.status == UploadBatch.Status.FAILED
+    assert "boom: disk on fire" in batch.failure_reason
+    assert batch.finished_at is not None
