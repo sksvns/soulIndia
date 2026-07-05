@@ -1,6 +1,56 @@
+from django.conf import settings
 from django.db import models
 
-from apps.masterdata.models import DimBrand, DimCalendar, DimProduct, DimSeason, DimStore
+from apps.masterdata.models import (
+    BrandUploadConfig,
+    DimBrand,
+    DimCalendar,
+    DimProduct,
+    DimSeason,
+    DimStore,
+)
+
+
+class UploadBatch(models.Model):
+    """One uploaded file's provenance and lifecycle.
+
+    `slices` records which (store, month) pairs this batch touched -- see
+    ADR-0002 -- which is what the Day 6 loader iterates over, what targets
+    MV refresh, and what a rollback undoes.
+    """
+
+    class Status(models.TextChoices):
+        RECEIVED = "received", "Received"
+        PARSING = "parsing", "Parsing"
+        VALIDATING = "validating", "Validating"
+        FAILED = "failed", "Failed"
+        LOADED = "loaded", "Loaded"
+        ROLLED_BACK = "rolled_back", "Rolled back"
+
+    batch_id = models.BigAutoField(primary_key=True)
+    brand = models.ForeignKey(DimBrand, on_delete=models.PROTECT, related_name="upload_batches")
+    config = models.ForeignKey(
+        BrandUploadConfig, on_delete=models.PROTECT, related_name="upload_batches"
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="upload_batches"
+    )
+    file_name = models.CharField(max_length=255)
+    object_key = models.CharField(max_length=512)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.RECEIVED)
+    row_count = models.IntegerField(null=True, blank=True)
+    error_count = models.IntegerField(null=True, blank=True)
+    slices = models.JSONField(default=list, blank=True)
+    error_report_key = models.CharField(max_length=512, null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "upload_batch"
+
+    def __str__(self):
+        return f"batch#{self.batch_id} {self.brand.brand_code} {self.status}"
 
 
 class FactSales(models.Model):
@@ -36,9 +86,14 @@ class FactSales(models.Model):
     discount_value = models.DecimalField(max_digits=14, decimal_places=2)
     is_return = models.BooleanField(default=False)
     extra = models.JSONField(default=dict, blank=True)
-    # Plain (non-FK) column for now -- upload_batch doesn't exist until Day 4.
-    # Day 4 adds the real FK constraint once apps.ingestion.UploadBatch exists.
-    upload_batch_id = models.BigIntegerField(null=True, blank=True)
+    batch = models.ForeignKey(
+        UploadBatch,
+        on_delete=models.DO_NOTHING,
+        db_column="upload_batch_id",
+        null=True,
+        blank=True,
+        related_name="fact_rows",
+    )
     source_row_no = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

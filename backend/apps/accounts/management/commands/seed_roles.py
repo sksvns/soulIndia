@@ -11,6 +11,8 @@ DATA_INSERTER_PERMISSIONS = [
     ("masterdata", "view_dimstore"),
     ("masterdata", "view_dimproduct"),
     ("masterdata", "view_branduploadconfig"),
+    ("ingestion", "add_uploadbatch"),
+    ("ingestion", "view_uploadbatch"),
 ]
 
 
