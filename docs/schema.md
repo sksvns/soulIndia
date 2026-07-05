@@ -130,6 +130,34 @@ filters/trends despite one being derived and one supplied.
 - Sample sanity check (must hold in Day 7 tests): MRP 2999, Net 1799 →
   discount_value 1200, computed discount% = 40% (matches supplied WAD).
 
+## Day 2 implementation notes
+
+Two small, deliberate refinements surfaced while actually building the
+migrations (both proven by tests, not just asserted):
+
+- **`fact_sales` primary key is `(brand_id, sale_date, sale_id)`, not just
+  `(brand_id, sale_id)`.** `fact_sales` is partitioned two levels deep --
+  `LIST(brand_id)`, then each brand partition is further `RANGE(sale_date)`
+  by financial year. PostgreSQL requires a partitioned table's unique
+  indexes/PK to include the partition key of *every* partitioning level it
+  will inherit down to, not just the top one. This was caught by
+  `test_creating_a_brand_auto_creates_its_partition` failing against a real
+  Postgres 16 instance with `NotSupportedError: unique constraint on
+  partitioned table must include all partitioning columns`, not by
+  inspection. `sale_id` is still the single globally-unique surrogate key
+  (one shared sequence across all partitions, and what Django's ORM treats
+  as the primary key) -- this is purely about what the physical composite
+  constraint has to contain. No change to ADR-0002's guarantee: still no
+  natural/business-column uniqueness anywhere on this table.
+- **`dim_product` has `category` and `sub_category` only** -- no separate
+  `main_category` or `item_name` columns, despite plan.md Sec 3's literal
+  field list mentioning both. This matches the frozen 2-level category
+  hierarchy decision (Category -> Sub-Category) and the Day 0 mapping
+  configs already built against the real files, where `MAIN CATEGORY`/`ITEM
+  NAME` land on `category`/`article_code` -- adding separate fields for them
+  would just duplicate the same source data under redundant names for both
+  real brands.
+
 ## Open items still pending (not blocking Day 0)
 
 - Explicit store-month deletion (no replacement data) — needs a client-defined
