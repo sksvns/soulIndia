@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Django
+backend/**/staticfiles/
+backend/**/media/
+db.sqlite3
+*.log
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Docker
+*.pid
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
