@@ -164,6 +164,18 @@ in the frontend container.
 
 ## Day 2 — Data model & partitioned fact
 
+**Status:** ✅ Done (2026-07-05), pending your review (this is a review gate).
+Verified against a real Postgres 16 instance from a fresh volume: all 7
+dimension tables + `fact_sales` migrate cleanly, `seed_brands`/`seed_calendar`
+run end-to-end, creating a brand auto-creates its `fact_sales_bN` LIST
+partition, inserting a row auto-routes into the right `_fyNNNN` RANGE
+sub-partition, and both `UNIQUE(brand,store_code)`/`UNIQUE(brand,barcode)`
+and out-of-range inserts are rejected. One schema correction found by a real
+test failure (not by inspection) is documented in `docs/schema.md` Sec "Day 2
+implementation notes": the PK had to become `(brand_id, sale_date, sale_id)`,
+not `(brand_id, sale_id)`, because Postgres requires a partitioned table's
+unique indexes to cover every partitioning level, not just the top one.
+
 **Goals:** the full canonical schema exists and is tested.
 
 **Tasks**
