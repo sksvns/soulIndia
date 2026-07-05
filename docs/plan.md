@@ -321,6 +321,50 @@ deliberately, since Day 6 owns the actual load into `fact_sales`.
 
 ## Day 6 — Ingestion: load, store-month replace, MV refresh (HIGH RISK)
 
+**Status:** ✅ Done (2026-07-05), pending your review (second review gate).
+Idempotent load into partitioned `fact_sales`: per-batch `UNLOGGED` staging
+table + `COPY`, `(store, calendar-month)` slice detection, partition
+creation on demand, and `DELETE`+`INSERT` per slice -- all inside one
+transaction, so a failure anywhere leaves `fact_sales` completely untouched.
+`dim_season`/`dim_calendar` resolution added (calendar seeded Day 2, never
+auto-extended -- an out-of-range date fails loudly rather than silently
+growing the calendar). Batch rollback exists both as a direct function and
+a Django admin action. MV refresh + Redis cache-bust are deliberately
+deferred to Day 7, since the materialized views don't exist until then.
+98/98 tests pass, including 11 covering every stated acceptance criterion
+directly: identical totals on re-upload, a store-only correction leaving
+other stores untouched, a return row reducing aggregate net sales, and a
+batch spanning two financial years correctly creating both partitions.
+
+**One fix made before starting today's build**, prompted by a user question
+about whether bad records could ever be silently lost: row-level validation
+failures already failed the whole batch with a full report (nothing new
+needed there), but an *unexpected* error (storage outage, DB error, a bug)
+would have left a batch stuck at `validating` forever with no explanation,
+since the exception propagated past the code that marks it failed. Fixed
+with a catch-all in the Celery task that always leaves a visible `failed`
+status with a reason, then re-raises so Celery's own error tracking still
+sees it.
+
+**Verified at real production scale, not just small fixtures:** ran the
+full pipeline against the complete real Pepe file (16,369 rows, minus the
+25 rows already known from Day 5 to be genuine data-quality issues) through
+the actual HTTP API with a live Celery worker -- 118 distinct `(store,
+month)` slices detected, correctly spanning two financial years, loaded
+successfully. Re-uploaded the identical file and confirmed the row count
+and total net_value matched exactly (idempotent at real scale, not just in
+a 3-row unit test).
+
+**Design decision worth flagging:** "month" in the replace-slice key is the
+*calendar* month of `sale_date`, not the brand's supplied `month` text.
+Killer's supplied MONTH is bare text like "APRIL" with no year, and its
+historical export spans three financial years -- grouping by that text
+alone would silently merge April 2023, April 2024, and April 2025 into one
+slice, corrupting corrections across unrelated years. This doesn't violate
+the frozen "trust month/FY/season as supplied" rule: that rule governs the
+canonical attribute *shown to users*, which is untouched and still stored
+verbatim in `extra`; the replace-slice key is an internal loader detail.
+
 **Goals:** idempotent load into the partitioned fact with correct correction semantics.
 
 **Tasks**
