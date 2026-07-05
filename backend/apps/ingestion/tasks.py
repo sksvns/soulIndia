@@ -8,6 +8,7 @@ from core.celery import app
 
 from . import storage
 from .error_report import build_error_report_csv
+from .loader import load_batch
 from .models import UploadBatch
 from .pipeline import run_pipeline
 
@@ -45,23 +46,27 @@ def _run(batch: UploadBatch) -> None:
         batch.save(update_fields=["status", "error_count", "error_report_key", "finished_at"])
         return
 
+    # Load: store-month replace (ADR-0002), one transaction. TODO(Day 7):
+    # refresh the affected materialized views and bust their Redis cache
+    # keys here once mv_sales_summary/mv_store_perf/mv_category_perf exist.
+    slices = load_batch(batch, result.rows)
+
+    batch.status = UploadBatch.Status.LOADED
     batch.row_count = len(result.rows)
     batch.error_count = 0
-    batch.save(update_fields=["row_count", "error_count"])
+    batch.slices = slices
+    batch.finished_at = timezone.now()
+    batch.save(update_fields=["status", "row_count", "error_count", "slices", "finished_at"])
 
 
 @app.task
 def process_upload_batch(batch_id: int) -> None:
-    """parse -> map -> validate, per plan.md Day 5. On any row error the
-    whole batch fails with a downloadable report and nothing is persisted.
-    On *any* other failure -- storage outage, DB error, a bug -- the batch
-    still ends up visibly "failed" with a reason, never silently stuck
-    mid-pipeline; the exception is re-raised so Celery's own error tracking
-    still sees it too.
-
-    Day 6 continues from a successful "validating" state: COPY into staging,
-    determine (store, month) slices, replace within one transaction, refresh
-    materialized views, and finally mark the batch "loaded".
+    """parse -> map -> validate -> load, per plan.md Days 5-6. On any row
+    error the whole batch fails with a downloadable report and nothing is
+    persisted. On *any* other failure -- storage outage, DB error, a bug --
+    the batch still ends up visibly "failed" with a reason, never silently
+    stuck mid-pipeline; the exception is re-raised so Celery's own error
+    tracking still sees it too.
     """
     batch = UploadBatch.objects.select_related("brand", "config").get(pk=batch_id)
     try:
