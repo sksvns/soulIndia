@@ -193,6 +193,22 @@ unique indexes to cover every partitioning level, not just the top one.
 
 ## Day 3 — Auth & extensible RBAC
 
+**Status:** ✅ Done (2026-07-05). Custom email/password `User` model (swapped
+in via `AUTH_USER_MODEL` before any real deployment, so no migration
+surgery needed), JWT auth (login/refresh/logout-via-blacklist) through
+`djangorestframework-simplejwt`, a password-reset stub, and RBAC built
+purely on Django Groups + Permissions -- `seed_roles` gives Super Admin
+*every* permission that exists (idempotent, self-updating as new models
+appear) and Data Inserter a curated view-only set today, extended in Day 4
+once `upload_batch` exists. All permission checks are capability-based
+(`user.has_perm(...)`), never role-name checks. 26/26 tests pass, verified
+end-to-end through nginx from a fresh volume (login, `/me`, admin session
+login all confirmed live, not just in tests) -- which is how a real nginx
+bug got caught: static `proxy_pass` cached the backend container's IP at
+nginx startup, so recreating the backend (any redeploy) 502'd until nginx
+was restarted; fixed with `resolver` + variable-based `proxy_pass` so nginx
+re-resolves container names per request. Documented as a `fix:` commit.
+
 **Goals:** login and role-gated access; admin for master data.
 
 **Tasks**

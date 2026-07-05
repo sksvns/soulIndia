@@ -48,7 +48,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DJANGO_SECRET_KEY: ci-test-secret
+      DJANGO_SECRET_KEY: ci-test-secret-key-32-bytes-minimum-length
       DJANGO_DEBUG: "true"
       POSTGRES_DB: retail_analytics
       POSTGRES_USER: retail_analytics

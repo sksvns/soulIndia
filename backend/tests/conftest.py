@@ -1,0 +1,31 @@
+from io import StringIO
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+from django.core.management import call_command
+
+User = get_user_model()
+
+
+@pytest.fixture
+def seed_roles(db):
+    call_command("seed_roles", stdout=StringIO())
+
+
+@pytest.fixture
+def super_admin_user(seed_roles):
+    user = User.objects.create_user(
+        email="admin@example.com", password="StrongPass123", is_staff=True
+    )
+    user.groups.add(Group.objects.get(name="Super Admin"))
+    return user
+
+
+@pytest.fixture
+def data_inserter_user(seed_roles):
+    user = User.objects.create_user(
+        email="inserter@example.com", password="StrongPass123", is_staff=False
+    )
+    user.groups.add(Group.objects.get(name="Data Inserter"))
+    return user
