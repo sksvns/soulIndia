@@ -12,7 +12,7 @@ from tests.ingestion_fixtures import KILLER_BAD_ROWS, KILLER_GOOD_ROWS, killer_w
 
 
 @pytest.fixture
-def killer_brand_and_config(db):
+def killer_brand_and_config(seed_calendar):
     call_command("seed_brands", stdout=StringIO())
     call_command("seed_upload_configs", stdout=StringIO())
     brand = DimBrand.objects.get(brand_code="KILLER")
@@ -29,9 +29,11 @@ def _upload_and_create_batch(brand, config, user, workbook, filename):
 
 
 @pytest.mark.django_db
-def test_process_upload_batch_on_a_clean_file_reaches_validating_with_row_count(
+def test_process_upload_batch_on_a_clean_file_loads_into_fact_sales(
     killer_brand_and_config, data_inserter_user
 ):
+    from apps.ingestion.models import FactSales
+
     brand, config = killer_brand_and_config
     batch = _upload_and_create_batch(
         brand, config, data_inserter_user, killer_workbook(KILLER_GOOD_ROWS), "april.xlsx"
@@ -40,13 +42,15 @@ def test_process_upload_batch_on_a_clean_file_reaches_validating_with_row_count(
     process_upload_batch(batch.batch_id)
 
     batch.refresh_from_db()
-    assert batch.status == UploadBatch.Status.VALIDATING
+    assert batch.status == UploadBatch.Status.LOADED
     assert batch.row_count == 3
     assert batch.error_count == 0
     assert batch.started_at is not None
-    # Day 6 continues from here to actually load into fact_sales.
+    assert batch.finished_at is not None
+    assert len(batch.slices) > 0
     assert DimStore.objects.filter(brand=brand, store_code="ESIS170").exists()
     assert DimProduct.objects.filter(brand=brand).exists()
+    assert FactSales.objects.filter(batch=batch).count() == 3
 
 
 @pytest.mark.django_db
