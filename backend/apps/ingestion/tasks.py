@@ -4,6 +4,8 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 
+from apps.analytics import cache as analytics_cache
+from apps.analytics.materialized_views import refresh_all
 from core.celery import app
 
 from . import storage
@@ -57,9 +59,7 @@ def _run(batch: UploadBatch) -> None:
 
     logger.info("batch #%s: validation passed, %d row(s)", batch.batch_id, len(result.rows))
 
-    # Load: store-month replace (ADR-0002), one transaction. TODO(Day 7):
-    # refresh the affected materialized views and bust their Redis cache
-    # keys here once mv_sales_summary/mv_store_perf/mv_category_perf exist.
+    # Load: store-month replace (ADR-0002), one transaction.
     try:
         slices = load_batch(batch, result.rows)
     except DataAlterationNotPermitted as exc:
@@ -70,6 +70,12 @@ def _run(batch: UploadBatch) -> None:
         batch.finished_at = timezone.now()
         batch.save(update_fields=["status", "failure_reason", "finished_at"])
         return
+
+    # REFRESH MATERIALIZED VIEW CONCURRENTLY cannot run inside a transaction
+    # block, so this must happen after load_batch's transaction has already
+    # committed -- it has, since we're back in _run()'s default autocommit.
+    refresh_all()
+    analytics_cache.bust(batch.brand_id)
 
     batch.status = UploadBatch.Status.LOADED
     batch.row_count = len(result.rows)
