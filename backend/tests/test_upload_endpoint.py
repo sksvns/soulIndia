@@ -173,3 +173,4 @@ def test_upload_detail_view_returns_batch_status(
     assert response.data["batch_id"] == batch_id
     assert response.data["status"] == "received"
     assert response.data["brand_code"] == "KILLER"
+    assert "failure_reason" in response.data  # visible for system/permission failures too
