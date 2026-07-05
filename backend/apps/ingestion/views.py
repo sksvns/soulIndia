@@ -12,7 +12,11 @@ from .permissions import DjangoModelPermissionsIncludingView
 from .serializers import UploadBatchSerializer
 from .tasks import process_upload_batch
 
-ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+# .xlsb included alongside the plan's originally-specified CSV/XLSX/XLS --
+# both real Killer/Pepe sample files turned out to actually be .xlsb
+# (confirmed inspecting the real files during Day 0), which openpyxl can't
+# read at all (see apps/ingestion/parsing.py).
+ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".xlsb"}
 
 
 class UploadCreateView(APIView):
