@@ -263,6 +263,48 @@ command and MinIO needs `server /data`).
 
 ## Day 5 — Ingestion: parse → map → validate (HIGH RISK)
 
+**Status:** ✅ Done (2026-07-05). Full pandas-based pipeline: multi-format
+parse (CSV/XLSX/XLS/**XLSB**, see note below), per-row column resolution
+with real fallback support, explicit per-field type coercion (not pandas'
+automatic inference, which would mangle real barcodes/sizes/dates), the
+Pepe financial_year derivation, and a two-phase validator (Phase A pure
+checks, Phase B dimension resolution -- only runs if the whole file passes,
+inside a transaction, so a failure leaves zero orphan rows). 86/86 tests
+pass, including two integration test files running the real pipeline
+against fixtures built from genuine real-file values, not just plausible
+numbers.
+
+**Real-data verification, not just hand-built fixtures:** ran the actual
+pipeline against a 10,000-row slice of the real Killer file and the
+complete 16,373-row real Pepe file. This caught three real bugs before they
+could ever reach a client upload -- see `docs/schema.md` "Day 5
+implementation notes" for the full detail: (1) `mrp_value == unit_mrp *
+quantity` fails ~7% of real rows and was removed as a check, (2)
+`discount_value`'s sign needed excluding from the return/sale
+sign-consistency check (legitimate markups and rounding noise), (3) barcode
+fallback (`NEW EAN CODE` -> `EAN CODE`) had to become a per-row decision,
+not a per-file one. After these fixes, remaining real-data validation
+failures are genuine, rare data-quality issues (~0.15-0.2% of rows) --
+missing MRP with no fallback source, and isolated quantity-sign inversions
+in the source system -- correctly rejected rather than silently miscounted.
+
+**Real files are `.xlsb`, not `.xlsx`/`.xls` as "CSV/XLSX/XLS" implied** --
+confirmed inspecting both actual sample files back on Day 0. Added `pyxlsb`
+(plus `xlrd` for legacy `.xls`, keeping the originally-specified formats
+too) so the pipeline can actually ingest the real files.
+
+**Operational note:** the Celery worker doesn't hot-reload on code changes
+the way gunicorn does -- caught this when an end-to-end smoke test through
+the live API returned stale results from a worker still running old
+validation logic. Documented in the README (`docker compose restart
+celery` after backend code changes).
+
+Verified live end-to-end through the real HTTP API (not just tests): the
+real 10k-row Killer sample correctly fails with a downloadable error report
+matching the hand-analyzed 20 errors exactly, and a clean fixture correctly
+reaches `validating` with `row_count=3, error_count=0` -- stopping there
+deliberately, since Day 6 owns the actual load into `fact_sales`.
+
 **Goals:** turn any brand's messy Excel into clean, validated canonical rows or a clear error report.
 
 **Tasks**

@@ -44,27 +44,30 @@ def test_killer_real_headers_all_resolve_with_one_unknown_column_as_extra():
 
     mapped, unmapped = resolve_columns(headers, config["column_map"])
 
-    assert mapped["sale_date"] == "NEW DATE"
-    assert mapped["invoice_no"] == "BILL NO \nINVOICE NO"
-    assert mapped["store_code"] == "STORE CODE"
-    assert mapped["barcode"] == "NEW EAN CODE"  # primary source wins over EAN CODE fallback
-    assert mapped["article_code"] == "ITEM NAME"
-    assert mapped["category"] == "MAIN\nCATEGORY"
-    assert mapped["sub_category"] == "CATEGORY"
-    assert mapped["financial_year"] == "F. YEAR"
+    assert mapped["sale_date"] == ["NEW DATE"]
+    assert mapped["invoice_no"] == ["BILL NO \nINVOICE NO"]
+    assert mapped["store_code"] == ["STORE CODE"]
+    # Both barcode candidates present in this file -- both kept as
+    # per-row fallback candidates, in config-priority order.
+    assert mapped["barcode"] == ["NEW EAN CODE", "EAN CODE"]
+    assert mapped["article_code"] == ["ITEM NAME"]
+    assert mapped["category"] == ["MAIN\nCATEGORY"]
+    assert mapped["sub_category"] == ["CATEGORY"]
+    assert mapped["financial_year"] == ["F. YEAR"]
 
     assert "SUPER SECRET FIELD" in unmapped
     assert "INVOICE\nDATE" in unmapped  # legacy secondary date column, not authoritative
-    assert "EAN CODE" in unmapped  # fallback candidate not used since NEW EAN CODE was present
+    # EAN CODE is a real mapped candidate now (per-row fallback), not extra.
+    assert "EAN CODE" not in unmapped
 
 
-def test_barcode_falls_back_to_ean_code_when_new_ean_code_missing():
+def test_barcode_maps_to_ean_code_alone_when_new_ean_code_column_is_absent():
     config = _load_config("killer_menswear.json")
     headers = ["EAN CODE", "STORE CODE"]
 
     mapped, unmapped = resolve_columns(headers, config["column_map"])
 
-    assert mapped["barcode"] == "EAN CODE"
+    assert mapped["barcode"] == ["EAN CODE"]
     assert "EAN CODE" not in unmapped
 
 
@@ -95,12 +98,12 @@ def test_pepe_real_headers_resolve_with_one_unknown_column_as_extra():
 
     mapped, unmapped = resolve_columns(headers, config["column_map"])
 
-    assert mapped["sale_date"] == "DATE"
-    assert mapped["invoice_no"] == "BillNo"
-    assert mapped["barcode"] == "STOCKNo"
-    assert mapped["article_code"] == "PC9"
-    assert mapped["category"] == "GEN - CAT"
-    assert mapped["sub_category"] == "CATEGORY"
-    assert mapped["supplied_discount_pct"] == "WAD"
+    assert mapped["sale_date"] == ["DATE"]
+    assert mapped["invoice_no"] == ["BillNo"]
+    assert mapped["barcode"] == ["STOCKNo"]
+    assert mapped["article_code"] == ["PC9"]
+    assert mapped["category"] == ["GEN - CAT"]
+    assert mapped["sub_category"] == ["CATEGORY"]
+    assert mapped["supplied_discount_pct"] == ["WAD"]
 
     assert "A BRAND NEW COLUMN NOBODY MAPPED" in unmapped
