@@ -1,7 +1,7 @@
 from django.contrib import admin, messages
 
-from .loader import rollback_batch
-from .models import UploadBatch
+from .loader import DataAlterationNotPermitted, rollback_batch
+from .models import DataAlterationAudit, UploadBatch
 
 
 @admin.register(UploadBatch)
@@ -22,8 +22,38 @@ class UploadBatchAdmin(admin.ModelAdmin):
                 level=messages.WARNING,
             )
         total_deleted = 0
+        blocked = 0
         for batch in queryset.filter(status=UploadBatch.Status.LOADED):
-            total_deleted += rollback_batch(batch)
-        self.message_user(
-            request, f"Rolled back {total_deleted} fact_sales row(s) across the selected batches."
-        )
+            try:
+                total_deleted += rollback_batch(batch, request.user)
+            except DataAlterationNotPermitted as exc:
+                blocked += 1
+                self.message_user(request, f"Batch #{batch.batch_id}: {exc}", level=messages.ERROR)
+        if blocked:
+            self.message_user(
+                request,
+                f"{blocked} batch(es) require Super Admin access to roll back; see errors above.",
+                level=messages.ERROR,
+            )
+        if total_deleted:
+            self.message_user(
+                request,
+                f"Rolled back {total_deleted} fact_sales row(s) across the selected batches.",
+            )
+
+
+@admin.register(DataAlterationAudit)
+class DataAlterationAuditAdmin(admin.ModelAdmin):
+    list_display = ("audit_id", "created_at", "user", "brand", "action", "allowed", "batch")
+    list_filter = ("action", "allowed", "brand")
+    search_fields = ("user__email",)
+    readonly_fields = [f.name for f in DataAlterationAudit._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

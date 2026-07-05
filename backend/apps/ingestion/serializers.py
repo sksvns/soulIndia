@@ -17,6 +17,7 @@ class UploadBatchSerializer(serializers.ModelSerializer):
             "error_count",
             "slices",
             "error_report_key",
+            "failure_reason",
             "started_at",
             "finished_at",
             "created_at",

@@ -53,6 +53,12 @@ class UploadBatch(models.Model):
 
     class Meta:
         db_table = "upload_batch"
+        permissions = [
+            (
+                "alter_existing_data",
+                "Can replace or roll back sales data that is already loaded",
+            ),
+        ]
 
     def __str__(self):
         return f"batch#{self.batch_id} {self.brand.brand_code} {self.status}"
@@ -108,3 +114,39 @@ class FactSales(models.Model):
 
     def __str__(self):
         return f"sale#{self.sale_id} brand={self.brand_id} {self.sale_date}"
+
+
+class DataAlterationAudit(models.Model):
+    """Every attempt to replace or roll back already-loaded sales data --
+    allowed or blocked. `ingestion.alter_existing_data` is the capability
+    that gates this (Super Admin has it, since seed_roles gives Super Admin
+    every permission that exists; Data Inserter does not, since it's not on
+    that role's curated allowlist). A fresh load into empty slices is never
+    audited here -- only genuine alterations of existing rows.
+    """
+
+    class Action(models.TextChoices):
+        REPLACE = "replace", "Replace existing slice(s)"
+        ROLLBACK = "rollback", "Roll back batch"
+
+    audit_id = models.BigAutoField(primary_key=True)
+    batch = models.ForeignKey(
+        UploadBatch, on_delete=models.CASCADE, related_name="alteration_audits"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="alteration_audits"
+    )
+    brand = models.ForeignKey(DimBrand, on_delete=models.PROTECT)
+    action = models.CharField(max_length=16, choices=Action.choices)
+    details = models.JSONField(default=dict, blank=True)
+    allowed = models.BooleanField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "data_alteration_audit"
+
+    def __str__(self):
+        verb = "allowed" if self.allowed else "BLOCKED"
+        return (
+            f"{verb} {self.action}: {self.user} on {self.brand.brand_code} (batch #{self.batch_id})"
+        )

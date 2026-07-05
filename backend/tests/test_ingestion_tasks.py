@@ -110,3 +110,30 @@ def test_process_upload_batch_never_gets_silently_stuck_on_an_unexpected_error(
     assert batch.status == UploadBatch.Status.FAILED
     assert "boom: disk on fire" in batch.failure_reason
     assert batch.finished_at is not None
+
+
+@pytest.mark.django_db
+def test_process_upload_batch_cleanly_fails_when_a_data_inserter_tries_to_alter_existing_data(
+    killer_brand_and_config, data_inserter_user
+):
+    """A blocked alteration (ADR-0003) is an expected, clean rejection -- the
+    batch ends up failed with a specific, actionable reason, and (unlike a
+    real system error) process_upload_batch does *not* re-raise, since this
+    isn't a bug for Celery's error tracking to flag."""
+    brand, config = killer_brand_and_config
+    first_batch = _upload_and_create_batch(
+        brand, config, data_inserter_user, killer_workbook(KILLER_GOOD_ROWS), "april.xlsx"
+    )
+    process_upload_batch(first_batch.batch_id)
+    assert UploadBatch.objects.get(pk=first_batch.batch_id).status == UploadBatch.Status.LOADED
+
+    second_batch = _upload_and_create_batch(
+        brand, config, data_inserter_user, killer_workbook(KILLER_GOOD_ROWS), "april_again.xlsx"
+    )
+
+    process_upload_batch(second_batch.batch_id)  # does not raise
+
+    second_batch.refresh_from_db()
+    assert second_batch.status == UploadBatch.Status.FAILED
+    assert "requires Super Admin access" in second_batch.failure_reason
+    assert second_batch.finished_at is not None

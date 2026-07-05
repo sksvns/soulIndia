@@ -380,6 +380,39 @@ verbatim in `extra`; the replace-slice key is an internal loader detail.
 
 ---
 
+## Between Day 6 and Day 7 — data alteration requires Super Admin + logging
+
+**Not in the original plan** -- raised by the user while reviewing Day 6.
+Replacing or rolling back already-loaded data is materially more sensitive
+than loading new data, and needed to (a) require elevated access and (b) be
+durably audited, not just logged to text. See `docs/adr/0003-*.md` for full
+detail.
+
+**Shipped:** a new `ingestion.alter_existing_data` capability (Super Admin
+has it automatically; Data Inserter doesn't) gates both replacing an
+existing `(store, month)` slice and rolling back a batch. A fresh load into
+empty slices is untouched -- still fast, unblocked, unaudited. Every
+alteration attempt, allowed or blocked, is recorded in a new
+`DataAlterationAudit` table (visible read-only in Django admin) and logged
+(INFO for allowed, WARNING for blocked). Also added: proper structured
+logging across the ingestion pipeline (Django `LOGGING` config, stdout,
+Docker-captured -- there was almost none before this), and fixed a real gap
+caught while building this: `UploadBatch.failure_reason` existed on the
+model since Day 6 but was never exposed in the API response, so a blocked
+alteration's exact reason wasn't visible to the client. 103/103 tests pass.
+Verified live end-to-end through the real HTTP API: Data Inserter loads
+fresh data (succeeds) -> Data Inserter re-uploads the same data (blocked,
+exact message "You are altering data that requires Super Admin access")
+-> Super Admin re-uploads it (succeeds) -> both attempts visible in the
+audit trail.
+
+True *monitoring* (uptime alerts, error-tracking dashboards -- Sentry is
+the natural fit for Django) is deliberately deferred to Day 12/Phase 2 per
+the user's explicit choice: it needs an external service outside the
+frozen Phase 1 stack, not something to add silently mid-feature.
+
+---
+
 ## Day 7 — Materialized views + analytics read-path
 
 **Goals:** fast, correct aggregate APIs.

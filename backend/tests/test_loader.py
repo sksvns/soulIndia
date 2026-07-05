@@ -6,8 +6,14 @@ import pytest
 from django.core.management import call_command
 from django.db.models import Sum
 
-from apps.ingestion.loader import determine_slices, load_batch, month_bounds, rollback_batch
-from apps.ingestion.models import FactSales, UploadBatch
+from apps.ingestion.loader import (
+    DataAlterationNotPermitted,
+    determine_slices,
+    load_batch,
+    month_bounds,
+    rollback_batch,
+)
+from apps.ingestion.models import DataAlterationAudit, FactSales, UploadBatch
 from apps.ingestion.pipeline import run_pipeline
 from apps.masterdata.models import BrandUploadConfig, DimBrand, DimSeason
 from tests.ingestion_fixtures import KILLER_GOOD_ROWS, killer_workbook
@@ -101,9 +107,11 @@ def test_load_batch_resolves_season_and_preserves_supplied_text_in_extra(
 
 @pytest.mark.django_db
 def test_reuploading_the_same_data_twice_yields_identical_totals(
-    killer_brand_and_config, data_inserter_user
+    killer_brand_and_config, data_inserter_user, super_admin_user
 ):
-    """Acceptance: uploading April twice yields identical totals."""
+    """Acceptance: uploading April twice yields identical totals. The second
+    upload replaces existing data (ADR-0003), so it needs a Super Admin --
+    the replace mechanics under test here are orthogonal to that rule."""
     brand, config = killer_brand_and_config
     rows = _validated_rows(brand, config, KILLER_GOOD_ROWS)
 
@@ -112,7 +120,7 @@ def test_reuploading_the_same_data_twice_yields_identical_totals(
     total_after_first = FactSales.objects.filter(brand=brand).aggregate(t=Sum("net_value"))["t"]
     count_after_first = FactSales.objects.filter(brand=brand).count()
 
-    batch2 = _make_batch(brand, config, data_inserter_user)
+    batch2 = _make_batch(brand, config, super_admin_user)
     rows2 = _validated_rows(brand, config, KILLER_GOOD_ROWS)
     load_batch(batch2, rows2)
     total_after_second = FactSales.objects.filter(brand=brand).aggregate(t=Sum("net_value"))["t"]
@@ -127,9 +135,12 @@ def test_reuploading_the_same_data_twice_yields_identical_totals(
 
 @pytest.mark.django_db
 def test_correction_to_one_store_does_not_touch_another_store(
-    killer_brand_and_config, data_inserter_user
+    killer_brand_and_config, data_inserter_user, super_admin_user
 ):
-    """Acceptance: a store-only correction changes only that store."""
+    """Acceptance: a store-only correction changes only that store. The
+    correction itself replaces existing data (ADR-0003), so it needs a
+    Super Admin -- the store-scoping under test here is orthogonal to that
+    rule."""
     brand, config = killer_brand_and_config
 
     store_a_rows = [{**KILLER_GOOD_ROWS[0], "STORE CODE": "ESIS170", "BILL NO \nINVOICE NO": 1}]
@@ -150,7 +161,7 @@ def test_correction_to_one_store_does_not_touch_another_store(
             "DISCOUNT \nVALUE": 1499,
         }
     ]
-    batch_a2 = _make_batch(brand, config, data_inserter_user)
+    batch_a2 = _make_batch(brand, config, super_admin_user)
     load_batch(batch_a2, _validated_rows(brand, config, corrected_store_a_rows))
 
     # Store B untouched.
@@ -197,7 +208,7 @@ def test_upload_spanning_two_financial_years_creates_both_partitions_and_loads_c
 
 @pytest.mark.django_db
 def test_rollback_batch_deletes_its_facts_and_marks_status(
-    killer_brand_and_config, data_inserter_user
+    killer_brand_and_config, data_inserter_user, super_admin_user
 ):
     brand, config = killer_brand_and_config
     batch = _make_batch(brand, config, data_inserter_user)
@@ -205,7 +216,7 @@ def test_rollback_batch_deletes_its_facts_and_marks_status(
     load_batch(batch, rows)
     assert FactSales.objects.filter(batch=batch).count() == 3
 
-    deleted = rollback_batch(batch)
+    deleted = rollback_batch(batch, super_admin_user)
 
     assert deleted == 3
     assert not FactSales.objects.filter(batch=batch).exists()
@@ -214,7 +225,9 @@ def test_rollback_batch_deletes_its_facts_and_marks_status(
 
 
 @pytest.mark.django_db
-def test_rollback_only_deletes_its_own_batch_rows(killer_brand_and_config, data_inserter_user):
+def test_rollback_only_deletes_its_own_batch_rows(
+    killer_brand_and_config, data_inserter_user, super_admin_user
+):
     brand, config = killer_brand_and_config
     batch1 = _make_batch(brand, config, data_inserter_user)
     load_batch(batch1, _validated_rows(brand, config, [KILLER_GOOD_ROWS[0]]))
@@ -222,7 +235,7 @@ def test_rollback_only_deletes_its_own_batch_rows(killer_brand_and_config, data_
     batch2 = _make_batch(brand, config, data_inserter_user)
     load_batch(batch2, _validated_rows(brand, config, other_rows))
 
-    rollback_batch(batch1)
+    rollback_batch(batch1, super_admin_user)
 
     assert not FactSales.objects.filter(batch=batch1).exists()
     assert FactSales.objects.filter(batch=batch2).exists()
@@ -257,3 +270,78 @@ def test_admin_rollback_action_rolls_back_loaded_batches_only(
     assert loaded_batch.status == UploadBatch.Status.ROLLED_BACK
     assert received_batch.status == UploadBatch.Status.RECEIVED  # untouched, was skipped
     assert not FactSales.objects.filter(batch=loaded_batch).exists()
+
+
+# --- ADR-0003: altering existing data requires Super Admin ------------------
+
+
+@pytest.mark.django_db
+def test_data_inserter_can_freely_load_into_empty_slices_no_audit_created(
+    killer_brand_and_config, data_inserter_user
+):
+    brand, config = killer_brand_and_config
+    batch = _make_batch(brand, config, data_inserter_user)
+
+    load_batch(batch, _validated_rows(brand, config, KILLER_GOOD_ROWS))
+
+    assert FactSales.objects.filter(batch=batch).count() == 3
+    assert DataAlterationAudit.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_data_inserter_is_blocked_from_replacing_existing_data(
+    killer_brand_and_config, data_inserter_user
+):
+    brand, config = killer_brand_and_config
+    first_batch = _make_batch(brand, config, data_inserter_user)
+    load_batch(first_batch, _validated_rows(brand, config, KILLER_GOOD_ROWS))
+
+    second_batch = _make_batch(brand, config, data_inserter_user)
+    with pytest.raises(DataAlterationNotPermitted, match="requires Super Admin access"):
+        load_batch(second_batch, _validated_rows(brand, config, KILLER_GOOD_ROWS))
+
+    # Nothing changed -- the original data is exactly as it was.
+    assert FactSales.objects.filter(batch=first_batch).count() == 3
+    assert not FactSales.objects.filter(batch=second_batch).exists()
+
+    audit = DataAlterationAudit.objects.get()
+    assert audit.allowed is False
+    assert audit.user == data_inserter_user
+    assert audit.action == DataAlterationAudit.Action.REPLACE
+
+
+@pytest.mark.django_db
+def test_super_admin_can_replace_existing_data_and_it_is_audited(
+    killer_brand_and_config, data_inserter_user, super_admin_user
+):
+    brand, config = killer_brand_and_config
+    first_batch = _make_batch(brand, config, data_inserter_user)
+    load_batch(first_batch, _validated_rows(brand, config, KILLER_GOOD_ROWS))
+
+    second_batch = _make_batch(brand, config, super_admin_user)
+    load_batch(second_batch, _validated_rows(brand, config, KILLER_GOOD_ROWS))
+
+    assert not FactSales.objects.filter(batch=first_batch).exists()
+    assert FactSales.objects.filter(batch=second_batch).count() == 3
+
+    audit = DataAlterationAudit.objects.get()
+    assert audit.allowed is True
+    assert audit.user == super_admin_user
+    assert audit.action == DataAlterationAudit.Action.REPLACE
+
+
+@pytest.mark.django_db
+def test_data_inserter_is_blocked_from_rolling_back_a_loaded_batch(
+    killer_brand_and_config, data_inserter_user
+):
+    brand, config = killer_brand_and_config
+    batch = _make_batch(brand, config, data_inserter_user)
+    load_batch(batch, _validated_rows(brand, config, KILLER_GOOD_ROWS))
+
+    with pytest.raises(DataAlterationNotPermitted, match="requires Super Admin access"):
+        rollback_batch(batch, data_inserter_user)
+
+    assert FactSales.objects.filter(batch=batch).count() == 3  # untouched
+    audit = DataAlterationAudit.objects.get()
+    assert audit.allowed is False
+    assert audit.action == DataAlterationAudit.Action.ROLLBACK

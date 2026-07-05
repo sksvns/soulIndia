@@ -11,6 +11,7 @@ historical export spans three financial years. Grouping by that text alone
 would silently merge April 2023, April 2024, and April 2025 into one slice.
 """
 
+import logging
 from calendar import monthrange
 from datetime import date, timedelta
 
@@ -18,8 +19,16 @@ from django.db import connection, transaction
 from psycopg.types.json import Jsonb
 
 from . import dimension_resolver
-from .models import UploadBatch
+from .models import DataAlterationAudit, FactSales, UploadBatch
 from .partitioning import ensure_partition_for_date
+
+logger = logging.getLogger(__name__)
+
+
+class DataAlterationNotPermitted(Exception):
+    """Raised when a user without ingestion.alter_existing_data tries to
+    replace or roll back sales data that's already loaded."""
+
 
 STAGING_COLUMNS = [
     "brand_id",
@@ -69,6 +78,60 @@ def determine_slices(rows: list[dict]) -> dict[tuple, list[dict]]:
     return slices
 
 
+def find_conflicting_slices(brand_id: int, slices: dict) -> list[dict]:
+    """Slices that already have fact_sales rows -- loading over them is an
+    alteration of existing data (ADR-0003), not a fresh load."""
+    conflicts = []
+    for store_id, year, month in slices:
+        start, end = month_bounds(year, month)
+        existing_count = FactSales.objects.filter(
+            brand_id=brand_id, store_id=store_id, sale_date__gte=start, sale_date__lt=end
+        ).count()
+        if existing_count > 0:
+            conflicts.append(
+                {
+                    "store_id": store_id,
+                    "year": year,
+                    "month": month,
+                    "existing_row_count": existing_count,
+                }
+            )
+    return conflicts
+
+
+def _audit_and_require_permission(
+    user, brand, batch, action: str, details: dict, item_count: int
+) -> None:
+    """Every alteration attempt is recorded, allowed or not (ADR-0003)."""
+    allowed = user.has_perm("ingestion.alter_existing_data")
+    DataAlterationAudit.objects.create(
+        batch=batch, user=user, brand=brand, action=action, details=details, allowed=allowed
+    )
+    if allowed:
+        logger.info(
+            "user %s %s existing data for brand %s (batch #%s): %s",
+            user.email,
+            action,
+            brand.brand_code,
+            batch.batch_id,
+            details,
+        )
+        return
+
+    logger.warning(
+        "BLOCKED: user %s attempted to %s existing data for brand %s (batch #%s) "
+        "without Super Admin capability: %s",
+        user.email,
+        action,
+        brand.brand_code,
+        batch.batch_id,
+        details,
+    )
+    raise DataAlterationNotPermitted(
+        f"You are altering data that requires Super Admin access ({item_count} affected item(s))."
+    )
+
+
 def _staging_table_name(batch_id: int) -> str:
     return f"staging_fact_sales_batch_{batch_id}"
 
@@ -108,6 +171,12 @@ def load_batch(batch, rows: list[dict]) -> list[dict]:
     output) into fact_sales. Returns the slice summaries later stored on
     upload_batch.slices.
 
+    If any target slice already has fact_sales rows, this is an alteration
+    of existing data (ADR-0003) and requires the uploader to hold
+    ingestion.alter_existing_data -- raises DataAlterationNotPermitted
+    otherwise, before anything is touched. A fresh load into empty slices
+    is never gated or audited.
+
     Everything -- partition creation, staging, delete+insert per slice -- is
     one transaction: a failure at any point leaves fact_sales completely
     untouched, matching Day 5's "nothing loaded on error" guarantee extended
@@ -117,9 +186,21 @@ def load_batch(batch, rows: list[dict]) -> list[dict]:
         return []
 
     brand_id = batch.brand_id
+    slices = determine_slices(rows)
+
+    conflicts = find_conflicting_slices(brand_id, slices)
+    if conflicts:
+        _audit_and_require_permission(
+            batch.uploaded_by,
+            batch.brand,
+            batch,
+            DataAlterationAudit.Action.REPLACE,
+            {"slices": conflicts},
+            len(conflicts),
+        )
+
     date_ids = dimension_resolver.resolve_calendar_dates(rows)
     season_ids = dimension_resolver.resolve_seasons(rows)
-    slices = determine_slices(rows)
 
     for fy_start_year in {_fy_start_year(key[1], key[2]) for key in slices}:
         ensure_partition_for_date(brand_id, date(fy_start_year, 4, 1))
@@ -192,9 +273,26 @@ def _create_staging_sql(table_name: str) -> str:
     """
 
 
-def rollback_batch(batch) -> int:
+def rollback_batch(batch, user) -> int:
     """Deletes every fact_sales row tagged with this batch and marks it
-    rolled_back. Returns the number of rows deleted."""
+    rolled_back. Returns the number of rows deleted.
+
+    Removing already-loaded data is at least as sensitive as replacing it
+    (ADR-0003) -- gated by the same ingestion.alter_existing_data capability
+    and audited the same way, regardless of which caller invokes it (the
+    Django admin action or otherwise).
+    """
+    existing_count = FactSales.objects.filter(batch=batch).count()
+    if existing_count > 0:
+        _audit_and_require_permission(
+            user,
+            batch.brand,
+            batch,
+            DataAlterationAudit.Action.ROLLBACK,
+            {"row_count": existing_count},
+            existing_count,
+        )
+
     with transaction.atomic():
         with connection.cursor() as cursor:
             cursor.execute("DELETE FROM fact_sales WHERE upload_batch_id = %s", [batch.batch_id])
