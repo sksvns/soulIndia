@@ -127,6 +127,12 @@ REST_FRAMEWORK = {
     ],
 }
 
+OBJECT_STORAGE_ENDPOINT_URL = os.environ.get("OBJECT_STORAGE_ENDPOINT_URL", "http://minio:9000")
+OBJECT_STORAGE_ACCESS_KEY = os.environ.get("OBJECT_STORAGE_ACCESS_KEY", "minioadmin")
+OBJECT_STORAGE_SECRET_KEY = os.environ.get("OBJECT_STORAGE_SECRET_KEY", "minioadmin")
+OBJECT_STORAGE_BUCKET = os.environ.get("OBJECT_STORAGE_BUCKET", "retail-analytics-uploads")
+OBJECT_STORAGE_REGION = os.environ.get("OBJECT_STORAGE_REGION", "auto")
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
