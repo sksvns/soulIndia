@@ -5,7 +5,7 @@ rows during load, zero code changes" (docs/architecture.md, extensibility
 principle), but only for files that are otherwise clean.
 """
 
-from apps.masterdata.models import DimProduct, DimStore
+from apps.masterdata.models import DimCalendar, DimProduct, DimSeason, DimStore
 
 
 def resolve_stores(brand, rows: list[dict]) -> dict[str, int]:
@@ -85,3 +85,43 @@ def resolve_products(brand, rows: list[dict]) -> dict[str, int]:
             }
         )
     return existing
+
+
+def resolve_seasons(rows: list[dict]) -> dict[str, int]:
+    """dim_season has no brand FK (plan.md Sec 3) -- season values are a
+    shared global vocabulary, not brand-scoped. Rows with no season are
+    simply skipped (season_id is nullable on fact_sales)."""
+    codes = {r["season"] for r in rows if r.get("season")}
+    if not codes:
+        return {}
+
+    existing = {s.season_code: s.season_id for s in DimSeason.objects.filter(season_code__in=codes)}
+    missing = codes - existing.keys()
+    if missing:
+        DimSeason.objects.bulk_create([DimSeason(season_code=code) for code in missing])
+        existing.update(
+            {s.season_code: s.season_id for s in DimSeason.objects.filter(season_code__in=missing)}
+        )
+    return existing
+
+
+def resolve_calendar_dates(rows: list[dict]) -> dict:
+    """dim_calendar is seeded once (Day 2, a wide fixed range) and never
+    auto-extended here -- a sale_date outside that range means either a
+    seeding gap that needs a deliberate fix, or a genuine data error (e.g. a
+    garbled year), and either way should fail loudly rather than silently
+    growing the calendar from whatever a file happens to contain.
+    """
+    dates = {r["sale_date"] for r in rows if r.get("sale_date")}
+    if not dates:
+        return {}
+
+    found = {c.date: c.date_id for c in DimCalendar.objects.filter(date__in=dates)}
+    missing = dates - found.keys()
+    if missing:
+        example = sorted(missing)[0]
+        raise ValueError(
+            f"{len(missing)} sale date(s) have no dim_calendar row (e.g. {example}); "
+            f"re-run seed_calendar with a wider --start/--end range"
+        )
+    return found

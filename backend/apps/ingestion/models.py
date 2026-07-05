@@ -42,6 +42,11 @@ class UploadBatch(models.Model):
     error_count = models.IntegerField(null=True, blank=True)
     slices = models.JSONField(default=list, blank=True)
     error_report_key = models.CharField(max_length=512, null=True, blank=True)
+    # Set only for system-level failures (storage/DB errors, bugs) -- row-level
+    # data-quality failures use error_count + error_report_key instead. Exists
+    # so a batch can never go silently stuck: every failure is visible with a
+    # reason, whether it's bad data or a system fault.
+    failure_reason = models.TextField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -14,6 +14,11 @@ def seed_roles(db):
 
 
 @pytest.fixture
+def seed_calendar(db):
+    call_command("seed_calendar", "--start=2020-04-01", "--end=2031-03-31", stdout=StringIO())
+
+
+@pytest.fixture
 def super_admin_user(seed_roles):
     user = User.objects.create_user(
         email="admin@example.com", password="StrongPass123", is_staff=True
