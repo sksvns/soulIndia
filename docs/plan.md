@@ -119,6 +119,13 @@ Goal: a deployed platform where an admin uploads any brand's file and immediatel
 
 ## Day 0 — Kickoff & schema freeze (½ day)
 
+**Status:** ✅ Done (2026-07-05). Grounded against the two real seed files
+(`KILLER - EAN CODE WISE SALE 23-24 TO 25-26.xlsb`,
+`PEPE BIHAR DSR REPORT 2026.xlsb`) rather than assumption alone — see
+`docs/schema.md` for the full column trace and `docs/adr/0002-*.md` for two
+open items resolved empirically (return-row sign consistency; multi-month
+single-file uploads).
+
 **Goals:** lock the canonical schema against real files; set up accounts.
 
 **Tasks**
@@ -134,6 +141,12 @@ Goal: a deployed platform where an admin uploads any brand's file and immediatel
 ---
 
 ## Day 1 — Foundation & skeleton
+
+**Status:** ✅ Done (2026-07-05). Verified end-to-end on a fresh volume:
+`docker compose up --build` migrates cleanly, `/health/` returns 200
+(DB+Redis+broker) both directly and via nginx, `pytest`/`ruff`/`black` are
+clean in the backend container, and `npm run lint`/`npm run build` are clean
+in the frontend container.
 
 **Goals:** reproducible dev environment; empty but running system.
 
