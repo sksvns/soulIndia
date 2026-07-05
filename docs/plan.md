@@ -225,6 +225,28 @@ re-resolves container names per request. Documented as a `fix:` commit.
 
 ## Day 4 — Brand mapping config + upload intake
 
+**Status:** ✅ Done (2026-07-05). `seed_upload_configs` loads the real Day 0
+Killer/Pepe configs (relocated from `docs/mapping-configs/` into
+`backend/apps/masterdata/seed_data/` so they're actually inside the Docker
+build context); `seed_attribute_registry` seeds the 14 Phase-1 filterable
+attributes. Object storage is a thin boto3 wrapper (MinIO in dev via a new
+compose service, same code path as R2/B2 in prod) with immutable, uniquely-
+keyed uploads. `UploadBatch` + the upload endpoint are built exactly to the
+architecture's split: the endpoint only stores bytes, creates the batch, and
+enqueues a Celery task -- it never reads file contents; a first slice of the
+mapping engine (`column_resolver.resolve_columns`) is tested against the
+real Killer/Pepe configs plus a synthetic unmapped column, proving the
+"never drop a column" routing decision, ahead of Day 5 building the rest of
+the pipeline on top of it. Verified live, not just in tests: uploaded a
+synthetic file through nginx with a real JWT-authenticated Data Inserter
+user, watched the Celery worker pick up the task and flip the batch to
+`parsing` within milliseconds, and confirmed the file landed immutably in
+MinIO. Also completed a Day-2 loose end: `fact_sales.upload_batch_id` now
+has its real FK constraint to `upload_batch`, deferred since Day 2 because
+the table didn't exist yet. 48/48 tests pass (added a MinIO step to CI,
+since GitHub Actions' `services:` block can't override a container's
+command and MinIO needs `server /data`).
+
 **Goals:** per-brand mapping stored & editable; raw files captured; jobs enqueued.
 
 **Tasks**
