@@ -58,12 +58,34 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       CELERY_BROKER_URL: redis://localhost:6379/0
       CELERY_RESULT_BACKEND: redis://localhost:6379/0
+      OBJECT_STORAGE_ENDPOINT_URL: http://localhost:9000
+      OBJECT_STORAGE_ACCESS_KEY: minioadmin
+      OBJECT_STORAGE_SECRET_KEY: minioadmin
+      OBJECT_STORAGE_BUCKET: retail-analytics-uploads
+      OBJECT_STORAGE_REGION: auto
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
+      # GH Actions `services:` can't override a container's command, and
+      # MinIO's image needs `server /data` as an explicit arg -- so it's run
+      # as a plain docker step instead of a service container.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 1
+          done
+      - name: Create MinIO bucket
+        run: |
+          docker run --rm --network host \
+            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
+            minio/mc mb --ignore-existing local/retail-analytics-uploads
       - run: python manage.py migrate --noinput
       - run: pytest -q
 

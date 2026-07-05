@@ -2,9 +2,13 @@
 
 This freezes the target schema from `plan.md` §3 against the two real seed
 files (`KILLER - EAN CODE WISE SALE 23-24 TO 25-26.xlsb`,
-`PEPE BIHAR DSR REPORT 2026.xlsb`). Machine-readable mapping configs are in
-`docs/mapping-configs/*.json`; this document is the human-readable
-column-by-column trace proving every source column lands somewhere.
+`PEPE BIHAR DSR REPORT 2026.xlsb`). Machine-readable mapping configs (loaded
+by `seed_upload_configs`, Day 4) live in
+`backend/apps/masterdata/seed_data/*.json` -- moved there from an initial
+`docs/mapping-configs/` draft location once Day 4 needed them inside the
+Docker build context to actually load them. This document is the
+human-readable column-by-column trace proving every source column lands
+somewhere.
 
 **Rule with no exceptions:** every source column maps to either a canonical
 field or `extra` JSONB. Nothing is ever silently dropped — there is no

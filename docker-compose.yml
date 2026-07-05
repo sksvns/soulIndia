@@ -22,6 +22,34 @@ services:
       timeout: 5s
       retries: 10
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${OBJECT_STORAGE_ACCESS_KEY:-minioadmin} ${OBJECT_STORAGE_SECRET_KEY:-minioadmin} &&
+      mc mb --ignore-existing local/${OBJECT_STORAGE_BUCKET:-retail-analytics-uploads}
+      "
+
   backend:
     build: ./backend
     env_file: .env
@@ -33,6 +61,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   celery:
@@ -46,6 +76,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   frontend:
@@ -72,3 +104,4 @@ services:
 volumes:
   pgdata:
   frontend_node_modules:
+  minio_data:
