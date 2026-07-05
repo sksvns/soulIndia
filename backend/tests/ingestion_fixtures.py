@@ -209,6 +209,96 @@ KILLER_BAD_ROWS = [
     },
 ]
 
+# Spans 2 financial years / 3 calendar months / 3 seasons / 2 categories /
+# 2 stores so trend math (YoY, MoM, Season-by-Season) and store/category
+# scoping have something real to group and order by. F. YEAR is left
+# consistent with each NEW DATE's fiscal year (Apr-Mar) since the MVs derive
+# financial_year from dim_calendar via sale_date, not from this column
+# (Killer's F. YEAR is trusted-as-supplied and only lands on fact_sales for
+# audit) -- but a mismatched value here would silently mask a real bug, so
+# it's kept accurate.
+KILLER_TREND_ROWS = [
+    {
+        **KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": 501,
+        "NEW DATE": date(2023, 4, 5),
+        "MONTH": "APRIL",
+        "F. YEAR": "23-24",
+        "CATEGORY": "SHIRTS",
+        "MAIN\nCATEGORY": "SHIRTS",
+        "SEASON": "SS23",
+        "MRP": 1000,
+        "QTY \nSALE": 1,
+        "NET \nSALE \nVALUE": 1000,
+        "DISCOUNT \nVALUE": 0,
+        "MRP \nSALE \nVALUE": 1000,
+    },
+    {
+        **KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": 502,
+        "NEW DATE": date(2023, 7, 10),
+        "MONTH": "JULY",
+        "F. YEAR": "23-24",
+        "CATEGORY": "SHIRTS",
+        "MAIN\nCATEGORY": "SHIRTS",
+        "SEASON": "SS23",
+        "MRP": 2000,
+        "QTY \nSALE": 1,
+        "NET \nSALE \nVALUE": 1800,
+        "DISCOUNT \nVALUE": 200,
+        "MRP \nSALE \nVALUE": 2000,
+    },
+    {
+        **KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": 503,
+        "NEW EAN CODE": 8905533435485,
+        "NEW DATE": date(2023, 10, 15),
+        "MONTH": "OCTOBER",
+        "F. YEAR": "23-24",
+        "CATEGORY": "JEANS",
+        "MAIN\nCATEGORY": "JEANS",
+        "SEASON": "AW23",
+        "MRP": 750,
+        "QTY \nSALE": 2,
+        "NET \nSALE \nVALUE": 1500,
+        "DISCOUNT \nVALUE": 0,
+        "MRP \nSALE \nVALUE": 1500,
+    },
+    {
+        **KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": 504,
+        "NEW DATE": date(2024, 4, 20),
+        "MONTH": "APRIL",
+        "F. YEAR": "24-25",
+        "CATEGORY": "SHIRTS",
+        "MAIN\nCATEGORY": "SHIRTS",
+        "SEASON": "SS24",
+        "MRP": 3000,
+        "QTY \nSALE": 1,
+        "NET \nSALE \nVALUE": 3000,
+        "DISCOUNT \nVALUE": 0,
+        "MRP \nSALE \nVALUE": 3000,
+    },
+    {
+        # Different store -- proves store_trend's store_code scoping
+        # actually filters, not just happens to match everything.
+        **KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": 505,
+        "NEW DATE": date(2023, 4, 5),
+        "MONTH": "APRIL",
+        "F. YEAR": "23-24",
+        "STORE CODE": "ESIS999",
+        "CATEGORY": "SHIRTS",
+        "MAIN\nCATEGORY": "SHIRTS",
+        "SEASON": "SS23",
+        "MRP": 500,
+        "QTY \nSALE": 1,
+        "NET \nSALE \nVALUE": 500,
+        "DISCOUNT \nVALUE": 0,
+        "MRP \nSALE \nVALUE": 500,
+    },
+]
+
 PEPE_GOOD_ROWS = [
     {
         "Store Name": "THE BIG SHOP - PURNEA",
