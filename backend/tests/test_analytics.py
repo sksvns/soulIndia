@@ -78,13 +78,13 @@ def test_dashboard_summary_matches_hand_computed_totals_to_the_paisa(loaded_kill
 def test_dashboard_summary_filters_by_financial_year_and_month(loaded_killer_data):
     brand = loaded_killer_data
 
-    matching = queries.dashboard_summary(brand.brand_id, financial_year="23-24", month_no=4)
+    matching = queries.dashboard_summary(brand.brand_id, {"financial_year": "23-24", "month": 4})
     assert matching["total"]["net_value"] == EXPECTED_TOTAL_NET
 
-    no_match_fy = queries.dashboard_summary(brand.brand_id, financial_year="24-25")
+    no_match_fy = queries.dashboard_summary(brand.brand_id, {"financial_year": "24-25"})
     assert no_match_fy["total"]["net_value"] == 0
 
-    no_match_month = queries.dashboard_summary(brand.brand_id, month_no=5)
+    no_match_month = queries.dashboard_summary(brand.brand_id, {"month": 5})
     assert no_match_month["total"]["net_value"] == 0
 
 
@@ -108,13 +108,10 @@ def test_category_perf_top10_reflects_2_level_hierarchy_and_store_filter(loaded_
     categories = {row["category"] for row in results}
     assert categories == {"SHIRTS", "JEANS"}
 
-    from apps.masterdata.models import DimStore
-
-    real_store_id = DimStore.objects.get(brand=brand, store_code="ESIS170").store_id
-    filtered = queries.category_perf_top10(brand.brand_id, store_ids=[real_store_id])
+    filtered = queries.category_perf_top10(brand.brand_id, {"store": ["ESIS170"]})
     assert len(filtered) == 2  # SHIRTS and JEANS, same store
 
-    no_match = queries.category_perf_top10(brand.brand_id, store_ids=[999999])
+    no_match = queries.category_perf_top10(brand.brand_id, {"store": ["NOSUCHSTORE"]})
     assert no_match == []
 
 

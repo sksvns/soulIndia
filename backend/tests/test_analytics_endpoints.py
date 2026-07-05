@@ -110,6 +110,123 @@ def test_unknown_brand_returns_404(data_inserter_user):
 
 
 @pytest.mark.django_db
+def test_filters_endpoint_returns_registry_metadata(data_inserter_user, seed_calendar):
+    from io import StringIO as _StringIO
+
+    call_command("seed_attribute_registry", stdout=_StringIO())
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/filters/")
+
+    assert response.status_code == 200
+    names = {row["canonical_name"] for row in response.data["filters"]}
+    assert "financial_year" in names
+    assert "store" in names
+
+
+@pytest.mark.django_db
+def test_dashboard_endpoint_applies_financial_year_and_month_filters(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    matching = client.get(
+        "/api/analytics/dashboard/",
+        {"brand_code": "KILLER", "financial_year": "23-24", "month": "4"},
+    )
+    no_match = client.get(
+        "/api/analytics/dashboard/", {"brand_code": "KILLER", "financial_year": "24-25"}
+    )
+
+    assert matching.data["total"]["net_value"] == Decimal("3055.00")
+    assert no_match.data["total"]["net_value"] == 0
+
+
+@pytest.mark.django_db
+def test_stores_endpoint_applies_city_and_zone_filters(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    matching = client.get(
+        "/api/analytics/stores/", {"brand_code": "KILLER", "city": "DUMRAO", "zone": "EAST"}
+    )
+    no_match = client.get("/api/analytics/stores/", {"brand_code": "KILLER", "city": "NOSUCHCITY"})
+
+    assert len(matching.data["results"]) == 1
+    assert no_match.data["results"] == []
+
+
+@pytest.mark.django_db
+def test_categories_endpoint_applies_multi_value_store_filter(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/analytics/categories/", {"brand_code": "KILLER", "store": "ESIS170,ESIS999"}
+    )
+
+    categories = {row["category"] for row in response.data["results"]}
+    assert categories == {"SHIRTS", "JEANS"}
+
+
+@pytest.mark.django_db
+def test_store_trends_endpoint_returns_series(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/analytics/trends/stores/",
+        {"brand_code": "KILLER", "dimension": "financial_year", "metric": "net"},
+    )
+
+    assert response.status_code == 200
+    assert response.data["results"] == [{"label": "23-24", "value": Decimal("3055.00")}]
+
+
+@pytest.mark.django_db
+def test_trends_endpoint_rejects_unknown_dimension(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/analytics/trends/stores/", {"brand_code": "KILLER", "dimension": "not_real"}
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_trends_endpoint_rejects_unknown_metric(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/analytics/trends/categories/", {"brand_code": "KILLER", "metric": "not_real"}
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_category_trends_endpoint_scoped_by_category_and_store(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/analytics/trends/categories/",
+        {
+            "brand_code": "KILLER",
+            "dimension": "season",
+            "metric": "net",
+            "category": "SHIRTS",
+            "store": "ESIS170",
+        },
+    )
+
+    assert response.status_code == 200
+    labels = {row["label"] for row in response.data["results"]}
+    assert labels == {"SS23"}
+
+
+@pytest.mark.django_db
 def test_full_upload_pipeline_refreshes_mvs_and_dashboard_reflects_new_data(
     killer_brand_and_config, data_inserter_user
 ):
