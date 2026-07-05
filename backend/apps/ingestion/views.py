@@ -1,3 +1,5 @@
+import logging
+
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
@@ -11,6 +13,8 @@ from .models import UploadBatch
 from .permissions import DjangoModelPermissionsIncludingView
 from .serializers import UploadBatchSerializer
 from .tasks import process_upload_batch
+
+logger = logging.getLogger(__name__)
 
 # .xlsb included alongside the plan's originally-specified CSV/XLSX/XLS --
 # both real Killer/Pepe sample files turned out to actually be .xlsb
@@ -69,6 +73,14 @@ class UploadCreateView(APIView):
             file_name=uploaded_file.name,
             object_key=object_key,
             status=UploadBatch.Status.RECEIVED,
+        )
+        logger.info(
+            "batch #%s: received %s for %s/%s from %s",
+            batch.batch_id,
+            uploaded_file.name,
+            brand.brand_code,
+            product_line,
+            request.user.email,
         )
         process_upload_batch.delay(batch.batch_id)
 

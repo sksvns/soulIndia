@@ -99,6 +99,44 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_USER_MODEL = "accounts.User"
 
+# Structured logging to stdout -- captured by Docker (`docker compose logs`)
+# in dev, and by whatever log driver/retention Day 12's prod compose sets up.
+# No external service (Sentry etc.) in Phase 1; deferred to Day 12/Phase 2.
+LOG_LEVEL = os.environ.get("DJANGO_LOG_LEVEL", "INFO")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{asctime} {levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
+}
+
 # Redis (cache + Celery broker/result backend share one instance in Phase 1)
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
