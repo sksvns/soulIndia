@@ -455,6 +455,57 @@ clears the cache before/after every test.
 
 ## Day 8 — Filter engine + trends API
 
+**Status:** ✅ Done (2026-07-06). `apps/analytics/filters.py` is a static
+`MV_COLUMNS` map (per-MV allowlist of supported canonical attribute ->
+real column) plus `build_where()`, which turns a filters dict into a
+parameterized `WHERE` fragment -- values are always bound params, never
+interpolated, and a filter an MV doesn't support is silently dropped
+rather than erroring (different MVs legitimately support different
+subsets). `dashboard_summary`/`store_perf_top10`/`category_perf_top10`
+were refactored from fixed kwargs to this generic `filters: dict`, so
+every documented attribute (financial_year, month, season, store, city,
+zone, category, sub_category, gender, discount_range) is filterable
+wherever its target MV exposes the column. A new migration
+(`0002_extend_materialized_views`) adds `city`/`zone` to
+`mv_store_perf`, `gender` to `mv_category_perf`, and `calendar_year`
+(via `EXTRACT(YEAR FROM MIN(sale_date))`) to all three MVs --
+`calendar_year` is what makes Month-over-Month sort correctly across a
+financial-year boundary (April must not sort before the previous July).
+`store_trend`/`category_trend` share a `_trend()` helper for YoY
+(`dimension=financial_year`), MoM (`dimension=month`), and
+Season-by-Season (`dimension=season`, ordered by each season code's
+earliest `calendar_year*12+month_no` occurrence, since season text like
+SS23/"FASHION BASICS"/CORE has no guaranteed lexical order) on
+net/mrp/quantity. `FilterOptionsView` reads `attribute_registry` live so
+the frontend filter bar discovers new filterable attributes with no
+backend/frontend code change. 143/143 tests pass (117 carried over + 26
+new: filter-engine unit tests, trend math against a hand-computed
+multi-year/multi-season fixture, and live filter/trend endpoint tests).
+
+**Real-data verified, not just fixtures:** re-extracted a fresh,
+whole-file stride sample (every 40th row, 8,000 rows spanning FY 23-24
+and 24-25) from the real 320k+-row Killer file and loaded it through the
+actual HTTP upload API. Caught and fixed a genuine bug in the
+*verification script itself* along the way: `pyxlsb` rows are sparse
+(a blank middle cell is omitted, not returned as `None`), so naive
+`[c.v for c in row]` silently shifted every later column left on any row
+with a blank interior cell -- fixed by placing each cell at its real
+`c.c` column index. Once fixed, the file's genuine data-quality rows
+(literal text `"NA"` in numeric cells, one row with quantity/net-value
+sign disagreement) were exactly and only what the pipeline correctly
+rejected -- confirming Day 5's all-or-nothing validation is still
+working as designed, not silently dropping anything. Verified live via
+curl against the loaded real data: YoY (`financial_year`) trend, MoM
+ordered correctly across the FY boundary, city/zone/discount_range
+filters on `/stores/`, and (using a second real Pepe extract) the
+`gender` filter on `/categories/` against real `MENS`/`LADIES`/`BOYS`/
+`GIRLS` values. One real-data nuance observed, not a bug: Season-by-
+Season ordering is by first *occurrence in the filtered result set*, so
+old discontinued-season labels (e.g. `AW15`, `SS16`) liquidated at
+random points in the sampled window don't land in their nominal
+calendar order -- current/recent seasons (`AW22`->`SS23`->`AW23`->
+`SS24`->`AW24`) do, which is the case the design targets.
+
 **Goals:** the "extensive filtering" requirement and all trend views.
 
 **Tasks**
