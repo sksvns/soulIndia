@@ -1,0 +1,63 @@
+{
+  "brand_code": "PEPE",
+  "product_line": "menswear",
+  "date_source": "DATE",
+  "header_normalization": "trim, collapse internal whitespace/newlines to a single space, uppercase",
+  "source_file_reference": "PEPE BIHAR DSR REPORT 2026.xlsb, sheet 'PEPE DSR- 2026'",
+  "column_map": {
+    "sale_date": { "source": ["DATE"], "cast": "excel_serial_date", "required": true },
+    "month": { "source": ["MONTH"], "cast": "str", "trusted_as_supplied": true },
+    "quarter": { "source": ["QUARTERS"], "cast": "str", "trusted_as_supplied": true },
+    "season": { "source": ["SEASON"], "cast": "str", "trusted_as_supplied": true },
+    "invoice_no": { "source": ["BILLNO"], "cast": "str", "required": true },
+    "store_code": { "source": ["STORE CODE"], "cast": "str", "required": true },
+    "store_name": { "source": ["STORE NAME"], "cast": "str", "required": true },
+    "city": { "source": ["CITY"], "cast": "str" },
+    "barcode": { "source": ["STOCKNO"], "cast": "barcode", "required": true },
+    "article_code": { "source": ["PC9"], "cast": "str", "required": true },
+    "size": { "source": ["SIZE"], "cast": "str" },
+    "color": { "source": ["COLOR"], "cast": "str" },
+    "gender": { "source": ["GENDER"], "cast": "str" },
+    "category": { "source": ["GEN - CAT"], "cast": "str", "required": true },
+    "sub_category": { "source": ["CATEGORY"], "cast": "str" },
+    "fit": { "source": ["FIT"], "cast": "str" },
+    "unit_mrp": { "source": ["MRP"], "cast": "decimal", "required": true },
+    "quantity": { "source": ["UNITS"], "cast": "int", "required": true },
+    "mrp_value": { "source": ["TOTAL MRP"], "cast": "decimal", "required": true },
+    "net_value": { "source": ["NET SALE PRICE"], "cast": "decimal", "required": true },
+    "discount_value": { "source": ["ACTUAL DISC"], "cast": "decimal", "required": true },
+    "supplied_discount_pct": { "source": ["WAD"], "cast": "fraction_to_percent", "validate_only": true }
+  },
+  "financial_year": {
+    "mode": "derived_exception",
+    "reason": "Pepe's file has no financial_year column, unlike every other brand where FY is supplied and trusted as-is. Confirmed with product owner on 2026-07-05: derive FY from the MONTH column for Pepe only. This is a documented, brand-scoped exception to the general 'never derive season/FY/month' rule -- it does not apply to any other brand.",
+    "derived_from": "MONTH",
+    "parse": "MONTH is formatted '<MONTH NAME>- <YYYY>', e.g. 'JANUARY- 2026' (confirmed in real sample data covering Jan-Apr 2026)",
+    "rule": "financial_year (Apr-Mar) of the parsed month/year; Jan/Feb/Mar YYYY -> FY (YYYY-1)-YYYY, Apr..Dec YYYY -> FY YYYY-(YYYY+1)",
+    "output_format": "YY-YY+1 (2-digit-2-digit, matching Killer's supplied convention, e.g. '25-26')"
+  },
+  "extra_source_columns": [
+    "L2L / ANULIZED",
+    "COUNTER TYPES",
+    "BA NAME",
+    "WEARHOUSE",
+    "ATV-GWP-EOSS-FRESH",
+    "REMARKS (OFFER/FRESH)"
+  ],
+  "validation_rules": {
+    "required_canonical_fields": [
+      "sale_date", "invoice_no", "store_code", "barcode",
+      "unit_mrp", "quantity", "mrp_value", "net_value", "discount_value"
+    ],
+    "is_return_when": "quantity < 0",
+    "discount_pct_tolerance_pct": 2.0,
+    "divide_by_zero_guard": "if mrp_value == 0, discount_pct is null, not an error",
+    "notes": [
+      "WAD is stored as a fraction (e.g. 0.30007...) not a percentage in the real file; multiply by 100 before comparing to the computed discount_pct.",
+      "BillNo is mixed-type in the real file (mostly text like 'PRHO26-79718', occasionally a bare number like 6045); always cast to string, never numeric.",
+      "STOCKNo (barcode) and Total MRP/Net Sale Price/Actual Disc are stored as floats in the source .xlsb; barcode must be cast via int() before str() to avoid scientific notation or trailing '.0'.",
+      "Sample sanity check (must hold in tests): MRP 2999, Net 1799 -> discount_value 1200, computed discount_pct 40% (matches supplied WAD).",
+      "Confirmed in real data: a single Pepe upload can span multiple months (the real DSR extract spans Jan-Apr 2026 in one file) -- slice detection must group by (store, month) actually present in the parsed data, never assume one file = one month."
+    ]
+  }
+}

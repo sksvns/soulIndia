@@ -1,0 +1,60 @@
+{
+  "brand_code": "KILLER",
+  "product_line": "menswear",
+  "date_source": "NEW DATE",
+  "header_normalization": "trim, collapse internal whitespace/newlines to a single space, uppercase",
+  "source_file_reference": "KILLER - EAN CODE WISE SALE 23-24 TO 25-26.xlsb, sheet '23-24 TO 25-26 SALE REPORT'",
+  "column_map": {
+    "sale_date": { "source": ["NEW DATE"], "cast": "excel_serial_date", "required": true },
+    "month": { "source": ["MONTH"], "cast": "str", "trusted_as_supplied": true },
+    "season": { "source": ["SEASON"], "cast": "str", "trusted_as_supplied": true },
+    "financial_year": { "source": ["F. YEAR"], "cast": "str", "trusted_as_supplied": true },
+    "invoice_no": { "source": ["BILL NO INVOICE NO"], "cast": "str", "required": true },
+    "store_code": { "source": ["STORE CODE"], "cast": "str", "required": true },
+    "store_name": { "source": ["NAME"], "cast": "str", "required": true },
+    "city": { "source": ["CITY"], "cast": "str" },
+    "state": { "source": ["STATE"], "cast": "str" },
+    "zone": { "source": ["ZONE"], "cast": "str" },
+    "store_type": { "source": ["TYPE"], "cast": "str" },
+    "distributor_name": { "source": ["DISTRIBUTOR NAME NEW"], "cast": "str" },
+    "barcode": { "source": ["NEW EAN CODE", "EAN CODE"], "cast": "barcode", "required": true },
+    "article_code": { "source": ["ITEM NAME"], "cast": "str", "required": true },
+    "category": { "source": ["MAIN CATEGORY"], "cast": "str", "required": true },
+    "sub_category": { "source": ["CATEGORY"], "cast": "str" },
+    "color": { "source": ["SHADE"], "cast": "str" },
+    "size": { "source": ["SIZE"], "cast": "str" },
+    "fit": { "source": ["FIT"], "cast": "str" },
+    "print_type": { "source": ["PRINT TYPE"], "cast": "str" },
+    "unit_mrp": { "source": ["MRP"], "cast": "decimal", "required": true },
+    "quantity": { "source": ["QTY SALE"], "cast": "int", "required": true },
+    "mrp_value": { "source": ["MRP SALE VALUE"], "cast": "decimal", "required": true },
+    "net_value": { "source": ["NET SALE VALUE"], "cast": "decimal", "required": true },
+    "discount_value": { "source": ["DISCOUNT VALUE"], "cast": "decimal", "required": true }
+  },
+  "extra_source_columns": [
+    "INVOICE DATE",
+    "PARTY NAME (AS PER STORE SIGNAGE)",
+    "BRAND",
+    "REPORT STATUS",
+    "STORE STATUS",
+    "ASM / RSM",
+    "CLSNG QTY",
+    "CLSNG VALUE"
+  ],
+  "validation_rules": {
+    "required_canonical_fields": [
+      "sale_date", "invoice_no", "store_code", "barcode",
+      "unit_mrp", "quantity", "mrp_value", "net_value", "discount_value"
+    ],
+    "is_return_when": "quantity < 0",
+    "discount_pct_tolerance_pct": 2.0,
+    "divide_by_zero_guard": "if mrp_value == 0, discount_pct is null, not an error",
+    "notes": [
+      "NEW EAN CODE and EAN CODE are identical in every sampled row; NEW EAN CODE is primary, EAN CODE is a fallback only (used if NEW EAN CODE is blank), not double-captured to extra.",
+      "PARTY NAME (AS PER STORE SIGNAGE) and NAME are near-duplicate store-name columns (differ only in spacing/punctuation) in sampled data; NAME is canonical store_name, the other is preserved in extra for audit.",
+      "TYPE is mapped to store_type per the client's column mapping, but is observed constant ('SALE') across the full 748k-row historical file as of Day 0 -- currently non-discriminative; re-verify once a brand/file shows a differing value.",
+      "BRAND column is redundant with the (brand, product_line) upload context that selects this config; not treated as authoritative, captured to extra for audit only.",
+      "CLSNG QTY / CLSNG VALUE are Phase 2 (SoH) fields; captured in extra now, not dropped, not used by any Phase 1 view."
+    ]
+  }
+}
