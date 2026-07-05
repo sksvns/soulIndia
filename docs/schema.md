@@ -162,6 +162,46 @@ migrations (both proven by tests, not just asserted):
   would just duplicate the same source data under redundant names for both
   real brands.
 
+## Day 5 implementation notes
+
+Verified the whole parse/map/validate pipeline against genuine slices of the
+real files (10,000 Killer rows, the complete 16,373-row Pepe file) -- not
+just hand-built fixtures. Three real findings changed the implementation,
+each caught by an actual validation failure against real data, not by
+inspection or guesswork:
+
+- **`mrp_value == unit_mrp * quantity` does not hold universally and was
+  removed as a validation rule.** ~7% of a real Killer sample failed it --
+  "MRP Sale Value" sometimes reflects a different reference basis than the
+  current MRP column (most likely EOSS/scheme pricing). This was never a
+  frozen requirement, just an inference from the plan's "compute mrp_value"
+  wording; `mrp_value`/`net_value`/`discount_value` are trusted as directly
+  supplied, matching the frozen decision that discount% is always computed
+  from them, never the reverse.
+- **`discount_value`'s sign is excluded from the return/sale sign-consistency
+  check.** `discount_value = mrp_value - net_value`, and a sale can
+  legitimately have `net_value > mrp_value` (a markup/premium, or paisa-level
+  rounding noise seen repeatedly in the real Pepe file, e.g. net exceeding
+  mrp by exactly 0.01) -- which makes discount_value negative on an
+  otherwise perfectly normal row. Only `quantity`, `mrp_value`, and
+  `net_value` are required to agree on sign (the original Day 0 empirical
+  finding), not `discount_value`.
+- **Barcode fallback (`NEW EAN CODE` -> `EAN CODE`) needed to be a per-row
+  decision, not a per-file one.** The real Killer file has rows where
+  `NEW EAN CODE` is blank but the legacy `EAN CODE` column still has a
+  value on that exact row. The initial implementation picked one winning
+  header per canonical field for the whole file; `column_resolver` now
+  returns every present candidate in priority order, and `row_mapper` picks
+  the first non-blank one per row.
+
+After these three fixes, the remaining validation failures against the real
+data are all genuine, rare data-quality issues, not pipeline bugs: ~6 rows
+per 10,000 with no MRP recorded at all (no fallback source exists), and
+about 1 row per 1,000-1,500 where quantity's sign is inverted relative to
+the value fields (net/mrp positive on a nominally-negative-quantity row, or
+vice versa) -- an isolated data-entry error in the source system, correctly
+rejected rather than silently miscounted as a sale or a return.
+
 ## Open items still pending (not blocking Day 0)
 
 - Explicit store-month deletion (no replacement data) — needs a client-defined
