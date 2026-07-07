@@ -9,6 +9,7 @@ from apps.analytics.materialized_views import refresh_all
 from core.celery import app
 
 from . import storage
+from .backfill import execute_backfill
 from .error_report import build_error_report_csv
 from .loader import DataAlterationNotPermitted, load_batch
 from .models import UploadBatch
@@ -105,6 +106,29 @@ def process_upload_batch(batch_id: int) -> None:
         _run(batch)
     except Exception as exc:
         logger.exception("batch #%s: failed with a system error", batch_id)
+        batch.status = UploadBatch.Status.FAILED
+        batch.failure_reason = str(exc)[:2000]
+        batch.finished_at = timezone.now()
+        batch.save(update_fields=["status", "failure_reason", "finished_at"])
+        raise
+
+
+@app.task
+def process_backfill_batch(batch_id: int) -> None:
+    """One-time historical backfill (apps.ingestion.backfill): loads every
+    row that passes Phase A validation, reports the rest in a CSV, instead
+    of process_upload_batch's all-or-nothing rule. Same system-error
+    handling as process_upload_batch -- a storage/DB outage or bug still
+    leaves the batch visibly failed with a reason, never silently stuck.
+    """
+    batch = UploadBatch.objects.select_related("brand", "config").get(pk=batch_id)
+    batch.status = UploadBatch.Status.VALIDATING
+    batch.started_at = timezone.now()
+    batch.save(update_fields=["status", "started_at"])
+    try:
+        execute_backfill(batch)
+    except Exception as exc:
+        logger.exception("batch #%s: backfill failed with a system error", batch_id)
         batch.status = UploadBatch.Status.FAILED
         batch.failure_reason = str(exc)[:2000]
         batch.finished_at = timezone.now()
