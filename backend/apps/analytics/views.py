@@ -1,4 +1,5 @@
 from django.shortcuts import get_object_or_404
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -26,6 +27,40 @@ FILTER_PARAM_NAMES = [
     "discount_range",
 ]
 MULTI_VALUE_PARAMS = {"store", "discount_range"}
+
+BRAND_CODE_PARAM = OpenApiParameter(
+    "brand_code", str, required=True, description="e.g. KILLER, PEPE"
+)
+FILTER_PARAMS = [
+    BRAND_CODE_PARAM,
+    OpenApiParameter("financial_year", str, description="e.g. 23-24"),
+    OpenApiParameter("month", int, description="1-12 (calendar month)"),
+    OpenApiParameter("season", str, description="e.g. SS23, AW23"),
+    OpenApiParameter("store", str, description="store_code; comma-separated for multi-select"),
+    OpenApiParameter("city", str),
+    OpenApiParameter("zone", str),
+    OpenApiParameter("category", str),
+    OpenApiParameter("sub_category", str),
+    OpenApiParameter("gender", str),
+    OpenApiParameter(
+        "discount_range", str, description="bucket label; comma-separated for multi-select"
+    ),
+]
+ORDER_BY_PARAM = OpenApiParameter(
+    "order_by",
+    str,
+    enum=["net", "mrp", "quantity", "discount_pct"],
+    description="default: net",
+)
+DIMENSION_PARAM = OpenApiParameter(
+    "dimension",
+    str,
+    enum=sorted(TREND_DIMENSIONS),
+    description="default: month",
+)
+METRIC_PARAM = OpenApiParameter(
+    "metric", str, enum=sorted(METRIC_COLUMNS), description="default: net"
+)
 
 
 def _resolve_brand(request) -> DimBrand:
@@ -55,6 +90,7 @@ class FilterOptionsView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(parameters=[])
     def get(self, request):
         attributes = list(
             AttributeRegistry.objects.filter(active=True, is_filterable=True)
@@ -69,6 +105,7 @@ class DashboardSummaryView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(parameters=FILTER_PARAMS)
     def get(self, request):
         brand = _resolve_brand(request)
         filters = _parse_filters(request)
@@ -86,6 +123,7 @@ class StorePerfView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(parameters=[*FILTER_PARAMS, ORDER_BY_PARAM])
     def get(self, request):
         brand = _resolve_brand(request)
         filters = _parse_filters(request)
@@ -104,6 +142,7 @@ class CategoryPerfView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(parameters=[*FILTER_PARAMS, ORDER_BY_PARAM])
     def get(self, request):
         brand = _resolve_brand(request)
         filters = _parse_filters(request)
@@ -148,6 +187,14 @@ class StoreTrendView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        parameters=[
+            BRAND_CODE_PARAM,
+            DIMENSION_PARAM,
+            METRIC_PARAM,
+            OpenApiParameter("store", str, description="store_code; brand-wide if omitted"),
+        ]
+    )
     def get(self, request):
         brand = _resolve_brand(request)
         dimension, metric, error = _validate_trend_params(request)
@@ -171,6 +218,18 @@ class CategoryTrendView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        parameters=[
+            BRAND_CODE_PARAM,
+            DIMENSION_PARAM,
+            METRIC_PARAM,
+            OpenApiParameter("category", str),
+            OpenApiParameter("sub_category", str),
+            OpenApiParameter(
+                "store", str, description="store_code(s), comma-separated; brand-wide if omitted"
+            ),
+        ]
+    )
     def get(self, request):
         brand = _resolve_brand(request)
         dimension, metric, error = _validate_trend_params(request)

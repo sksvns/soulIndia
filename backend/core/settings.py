@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
+    "drf_spectacular",
     "apps.accounts",
     "apps.masterdata",
     "apps.ingestion",
@@ -163,6 +164,16 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+# Swagger/OpenAPI docs (dev tooling for manually exercising the API as a
+# given role -- not part of the frozen stack, added on direct request).
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Retail Analytics Platform API",
+    "DESCRIPTION": "Multi-brand tertiary-sales ingestion + analytics API.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
 }
 
 OBJECT_STORAGE_ENDPOINT_URL = os.environ.get("OBJECT_STORAGE_ENDPOINT_URL", "http://minio:9000")

@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import serializers
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -26,6 +28,7 @@ class LogoutView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(request=inline_serializer("LogoutRequest", {"refresh": serializers.CharField()}))
     def post(self, request):
         refresh = request.data.get("refresh")
         if not refresh:
@@ -40,6 +43,18 @@ class LogoutView(APIView):
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        responses=inline_serializer(
+            "Me",
+            {
+                "email": serializers.EmailField(),
+                "full_name": serializers.CharField(),
+                "is_staff": serializers.BooleanField(),
+                "groups": serializers.ListField(child=serializers.CharField()),
+                "permissions": serializers.ListField(child=serializers.CharField()),
+            },
+        )
+    )
     def get(self, request):
         user = request.user
         return Response(
@@ -63,6 +78,9 @@ class PasswordResetRequestView(APIView):
 
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        request=inline_serializer("PasswordResetRequest", {"email": serializers.EmailField()})
+    )
     def post(self, request):
         email = request.data.get("email", "")
         user = User.objects.filter(email__iexact=email).first()
