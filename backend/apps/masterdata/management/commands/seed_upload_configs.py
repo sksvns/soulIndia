@@ -6,7 +6,7 @@ from django.core.management.base import BaseCommand, CommandError
 from apps.masterdata.models import BrandUploadConfig, DimBrand
 
 SEED_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "seed_data"
-CONFIG_FILES = ["killer_menswear.json", "pepe_menswear.json"]
+CONFIG_FILES = ["killer_menswear.json", "pepe_menswear.json", "junior_killer_kids.json"]
 
 
 class Command(BaseCommand):
@@ -39,6 +39,8 @@ class Command(BaseCommand):
                 validation_rules["derived_fields"] = {"financial_year": data["financial_year"]}
             if "extra_source_columns" in data:
                 validation_rules["extra_source_columns"] = data["extra_source_columns"]
+            if "sheet_name" in data:
+                validation_rules["sheet_name"] = data["sheet_name"]
 
             _config, created = BrandUploadConfig.objects.update_or_create(
                 brand=brand,

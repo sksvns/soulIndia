@@ -1,0 +1,59 @@
+{
+  "brand_code": "JUNIOR_KILLER",
+  "product_line": "kids",
+  "date_source": "NEW DATE",
+  "header_normalization": "trim, collapse internal whitespace/newlines to a single space, uppercase",
+  "source_file_reference": "JUNIOR KILLER MAR'24 TO MAY'26 SALE REPORT.xlsb, sheet 'Sheet1'",
+  "sheet_name": "Sheet1",
+  "column_map": {
+    "sale_date": { "source": ["NEW DATE"], "cast": "excel_serial_date", "required": true },
+    "month": { "source": ["MONTH"], "cast": "str", "trusted_as_supplied": true },
+    "season": { "source": ["SEASON"], "cast": "str", "trusted_as_supplied": true },
+    "invoice_no": { "source": ["BILL NO INVOICE NO"], "cast": "str", "required": true },
+    "store_code": { "source": ["STORE CODE"], "cast": "str", "required": true },
+    "store_name": { "source": ["NAME"], "cast": "str", "required": true },
+    "city": { "source": ["CITY"], "cast": "str" },
+    "state": { "source": ["STATE"], "cast": "str" },
+    "zone": { "source": ["ZONE"], "cast": "str" },
+    "store_type": { "source": ["TYPE"], "cast": "str" },
+    "distributor_name": { "source": ["DISTRIBUTOR NAME"], "cast": "str" },
+    "barcode": { "source": ["NEW EAN CODE", "EAN CODE"], "cast": "barcode", "required": true },
+    "article_code": { "source": ["ITEM NAME"], "cast": "str", "required": true },
+    "category": { "source": ["MAIN CATEGORY"], "cast": "str", "required": true },
+    "sub_category": { "source": ["CATEGORY"], "cast": "str" },
+    "color": { "source": ["SHADE"], "cast": "str" },
+    "size": { "source": ["SIZE"], "cast": "str" },
+    "fit": { "source": ["FIT"], "cast": "str" },
+    "print_type": { "source": ["PRINT TYPE"], "cast": "str" },
+    "unit_mrp": { "source": ["MRP"], "cast": "decimal", "required": true },
+    "quantity": { "source": ["QTY SALE"], "cast": "int", "required": true },
+    "mrp_value": { "source": ["MRP SALE VALUE"], "cast": "decimal", "required": true },
+    "net_value": { "source": ["NET SALE VALUE"], "cast": "decimal", "required": true },
+    "discount_value": { "source": ["DISCOUNT VALUE"], "cast": "decimal", "required": true }
+  },
+  "extra_source_columns": [
+    "INVOICE DATE",
+    "NAME AS PER REPORT RECEIVED",
+    "BRAND",
+    "REPORT STATUS",
+    "STORE STATUS",
+    "ASM / RSM",
+    "CLSNG QTY",
+    "CLSNG VALUE"
+  ],
+  "validation_rules": {
+    "required_canonical_fields": [
+      "sale_date", "invoice_no", "store_code", "barcode",
+      "unit_mrp", "quantity", "mrp_value", "net_value", "discount_value"
+    ],
+    "is_return_when": "quantity < 0 OR mrp_value < 0 (real data has both return conventions)",
+    "discount_pct_tolerance_pct": 2.0,
+    "divide_by_zero_guard": "if mrp_value == 0, discount_pct is null, not an error",
+    "notes": [
+      "Same file family/layout as KILLER's menswear export (same column vocabulary, minor header-text variants -- e.g. DISTRIBUTOR NAME here vs DISTRIBUTOR NAME NEW for Killer, NAME AS PER REPORT RECEIVED here vs PARTY NAME (AS PER STORE SIGNAGE) for Killer), but a genuinely distinct brand code and store-code namespace (JKESIS### vs ESIS###) -- kept as its own (brand, product_line) config rather than sharing Killer's, per the frozen (brand, product_line)-keyed mapping design.",
+      "No F. YEAR column at all in this file (unlike Killer) -- financial_year is simply unmapped; not a problem since it isn't in required_canonical_fields and the analytics MVs derive financial_year from dim_calendar via sale_date, never from this raw supplied column.",
+      "STORE CODE values are prefixed JK (e.g. JKESIS011) -- distinct from Killer's ESIS### -- consistent with store_code being unique only within a brand (frozen decision), not globally.",
+      "product_line is 'kids' per the frozen decision's anticipated womenswear/kids/footwear expansion -- BRAND column value is literally 'JR KILLER' in every sampled row, confirming this is the kids line, not adult menswear."
+    ]
+  }
+}
