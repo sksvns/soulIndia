@@ -73,8 +73,24 @@ date_source = `NEW DATE`. Source: `23-24 TO 25-26 SALE REPORT` sheet, 748,161 da
 
 **Observations from real data (Day 0):**
 - Scanned all 748,161 rows: `TYPE` is constant `"SALE"` throughout this file. It's mapped to `store_type` per the client's column mapping, but currently carries no discriminative information — flagged for re-verification once a file shows a different value.
-- Confirmed empirically (not from a sample assumption): on every negative-`QTY SALE` row, `QTY SALE`, `NET SALE VALUE`, `DISCOUNT VALUE`, and `MRP SALE VALUE` are all negative together; `MRP` (unit price) stays positive. `is_return := quantity < 0` is sufficient.
+- Confirmed empirically against a 10,000-row sample (not the full file): on every negative-`QTY SALE` row, `QTY SALE`, `NET SALE VALUE`, `DISCOUNT VALUE`, and `MRP SALE VALUE` are all negative together; `MRP` (unit price) stays positive. `is_return := quantity < 0` looked sufficient at this sample size.
 - `NEW EAN CODE` and `EAN CODE` are identical in every sampled row.
+
+**Correction after backfilling the complete 748,161-row file** (not just the
+10k sample): a second real return convention exists —
+`QTY SALE` stays **positive** while `MRP SALE VALUE`/`NET SALE VALUE` go
+negative (`DISCOUNT VALUE` typically `0`). Confirmed as a genuine return, not
+bad data, and accepted by explicit product decision:
+`is_return := quantity < 0 OR mrp_value < 0`. A second, unrelated pattern
+also only surfaced at full scale: a flat scheme/coupon discount can exceed a
+cheap item's `MRP SALE VALUE`, driving `NET SALE VALUE` negative on an
+otherwise completely normal **sale** (`MRP SALE VALUE` stays positive) — also
+accepted, not flagged as an error. The one sign combination with no
+legitimate real-data match across the full file: negative quantity with
+positive `MRP SALE VALUE`. See `apps/ingestion/validation.py` and
+`docs/adr/` for the reasoning; this is a case of a larger real dataset
+surfacing genuine business patterns a smaller sample didn't happen to
+contain, not a sample that was wrong.
 
 ## Pepe (menswear) — 28 source columns, all accounted for
 
@@ -133,6 +149,69 @@ filters/trends despite one being derived and one supplied.
   `.xlsb` → cast via `int()` before `str()` to avoid scientific notation.
 - Sample sanity check (must hold in Day 7 tests): MRP 2999, Net 1799 →
   discount_value 1200, computed discount% = 40% (matches supplied WAD).
+
+## Junior Killer (kids) — 33 source columns, all accounted for
+
+date_source = `NEW DATE`. Source: `Sheet1` of the file (sheets are
+`['Sheet2', 'Sheet1']` -- the data sheet is *not* index 0, same class of
+gotcha as Killer's `SUMMARY` sheet), 39,389 data rows spanning Mar 2024 to
+May 2026. Onboarded as a genuinely distinct brand (own `DimBrand` row, own
+`(brand, product_line)` config) despite the near-identical column layout to
+Killer's menswear file -- confirmed by `BRAND` being literally `"JR KILLER"`
+in every row and store codes living in their own `JKESIS###` namespace,
+distinct from Killer's `ESIS###` (store codes are unique only *within* a
+brand, per the frozen decision). `product_line = "kids"`, matching the
+frozen decision's anticipated womenswear/kids/footwear expansion -- the
+first real instance of it.
+
+| # | Source column | Canonical target |
+|---|---|---|
+| 1 | INVOICE DATE | `extra` (secondary date; NEW DATE is authoritative) |
+| 2 | NEW DATE | `sale_date` (authoritative) |
+| 3 | MONTH | `month` (trusted as supplied) |
+| 4 | BILL NO / INVOICE NO | `invoice_no` |
+| 5 | NAME AS PER REPORT RECEIVED | `extra` (near-duplicate of NAME, same role as Killer's PARTY NAME column) |
+| 6 | NAME | `store_name` |
+| 7 | STORE CODE | `store_code` |
+| 8 | BRAND | `extra` (redundant with upload context; literally "JR KILLER" always) |
+| 9 | REPORT STATUS | `extra` |
+| 10 | STORE STATUS | `extra` |
+| 11 | TYPE | `store_type` |
+| 12 | ZONE | `zone` |
+| 13 | CITY | `city` |
+| 14 | STATE | `state` |
+| 15 | DISTRIBUTOR NAME | `distributor_name` (Killer's equivalent column is named "DISTRIBUTOR NAME NEW" -- different exact header, same role, hence a separate config rather than sharing Killer's) |
+| 16 | ASM / RSM | `extra` |
+| 17 | EAN CODE | `barcode` fallback source |
+| 18 | NEW EAN CODE | `barcode` primary source |
+| 19 | MAIN CATEGORY | `category` |
+| 20 | ITEM NAME | `article_code` |
+| 21 | CATEGORY | `sub_category` |
+| 22 | SHADE | `color` |
+| 23 | SIZE | `size` (values like "11-12 YEARS" -- kids sizing, not adult) |
+| 24 | SEASON | `season` (trusted as supplied) |
+| 25 | MRP | `unit_mrp` |
+| 26 | FIT | `fit` |
+| 27 | PRINT TYPE | `print_type` |
+| 28 | CLSNG QTY | `extra` (Phase 2 SoH) |
+| 29 | CLSNG VALUE | `extra` (Phase 2 SoH) |
+| 30 | QTY SALE | `quantity` |
+| 31 | NET SALE VALUE | `net_value` |
+| 32 | DISCOUNT VALUE | `discount_value` |
+| 33 | MRP SALE VALUE | `mrp_value` |
+
+**No `F. YEAR` column at all** (unlike Killer) -- `financial_year` is simply
+unmapped for this brand. Not a problem: it isn't in
+`required_canonical_fields`, and the analytics MVs derive `financial_year`
+from `dim_calendar` via `sale_date` for every brand, never from this raw
+supplied column (which only ever lands in `extra` for audit).
+
+**Backfilled via `apps/ingestion/backfill.py` (ADR-0005), not the regular
+upload path**, as the first real load of this brand's history: 38,545 of
+39,389 rows loaded (97.9%); 844 rejected, 801 of them the same
+"`discount_value` blank instead of `0`" pattern already seen in both other
+real files, confirming it's a genuine cross-brand client-side export habit,
+not a bug specific to one file.
 
 ## Day 2 implementation notes
 
