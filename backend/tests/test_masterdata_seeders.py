@@ -12,7 +12,7 @@ def test_seed_upload_configs_loads_killer_and_pepe():
 
     call_command("seed_upload_configs", stdout=StringIO())
 
-    assert BrandUploadConfig.objects.count() == 2
+    assert BrandUploadConfig.objects.count() == 3
 
     killer_config = BrandUploadConfig.objects.get(brand__brand_code="KILLER")
     assert killer_config.product_line == "menswear"
@@ -29,6 +29,11 @@ def test_seed_upload_configs_loads_killer_and_pepe():
     )
     assert "WEARHOUSE" in pepe_config.validation_rules["extra_source_columns"]
 
+    junior_killer_config = BrandUploadConfig.objects.get(brand__brand_code="JUNIOR_KILLER")
+    assert junior_killer_config.product_line == "kids"
+    assert junior_killer_config.column_map["barcode"]["source"] == ["NEW EAN CODE", "EAN CODE"]
+    assert junior_killer_config.validation_rules["sheet_name"] == "Sheet1"
+
 
 @pytest.mark.django_db
 def test_seed_upload_configs_is_idempotent():
@@ -37,7 +42,7 @@ def test_seed_upload_configs_is_idempotent():
     call_command("seed_upload_configs", stdout=StringIO())
     call_command("seed_upload_configs", stdout=StringIO())
 
-    assert BrandUploadConfig.objects.count() == 2
+    assert BrandUploadConfig.objects.count() == 3
 
 
 @pytest.mark.django_db

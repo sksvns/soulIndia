@@ -6,7 +6,14 @@ from django.core.management import call_command
 
 from apps.ingestion.pipeline import run_pipeline
 from apps.masterdata.models import BrandUploadConfig, DimBrand, DimProduct, DimStore
-from tests.ingestion_fixtures import PEPE_BAD_ROWS, PEPE_GOOD_ROWS, pepe_workbook
+from tests.ingestion_fixtures import (
+    PEPE_BAD_ROWS,
+    PEPE_GOOD_ROWS,
+    PEPE_HEADERS,
+    PEPE_SHEET_NAME,
+    build_multi_sheet_workbook,
+    pepe_workbook,
+)
 
 
 @pytest.fixture
@@ -111,3 +118,28 @@ def test_pepe_single_file_spanning_multiple_months_validates_each_row_independen
     assert result.ok
     months = {r["month"] for r in result.rows}
     assert months == {"JANUARY- 2026", "APRIL- 2026"}
+
+
+@pytest.mark.django_db
+def test_pepe_reads_the_configured_sheet_not_sheet_index_zero(pepe_brand_and_config):
+    """Real Pepe files have 4 other sheets ('SALE - SUMMARY', 'MASTER',
+    'TILL DATE SHEET', 'JAGDISH') before the real data sheet 'PEPE DSR-
+    2026' -- proves the pipeline honors validation_rules['sheet_name']
+    instead of pandas' default of reading whatever sheet is first."""
+    brand, config = pepe_brand_and_config
+    assert config.validation_rules["sheet_name"] == PEPE_SHEET_NAME
+
+    decoy_headers = ["SOME", "UNRELATED", "SUMMARY", "COLUMNS"]
+    decoy_rows = [{"SOME": "x", "UNRELATED": "y", "SUMMARY": "z", "COLUMNS": "w"}]
+    workbook = build_multi_sheet_workbook(
+        [
+            ("SALE - SUMMARY", decoy_headers, decoy_rows),
+            ("MASTER", decoy_headers, decoy_rows),
+            (PEPE_SHEET_NAME, PEPE_HEADERS, PEPE_GOOD_ROWS),
+        ]
+    )
+
+    result = run_pipeline(brand, config, workbook, "pepe_multi_sheet.xlsx")
+
+    assert result.ok, result.errors
+    assert len(result.rows) == 3

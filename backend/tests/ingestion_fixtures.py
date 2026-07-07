@@ -46,6 +46,42 @@ KILLER_HEADERS = [
     "F. YEAR",
 ]
 
+JUNIOR_KILLER_HEADERS = [
+    "INVOICE \nDATE",
+    "NEW DATE",
+    "MONTH",
+    "BILL NO \nINVOICE NO",
+    "NAME AS PER REPORT RECEIVED",
+    "NAME",
+    "STORE CODE",
+    "BRAND",
+    "REPORT \nSTATUS",
+    "STORE \nSTATUS",
+    "TYPE",
+    "ZONE",
+    "CITY",
+    "STATE",
+    "DISTRIBUTOR NAME",
+    "ASM / RSM",
+    "EAN CODE",
+    "NEW EAN CODE",
+    "MAIN CATEGORY",
+    "ITEM NAME",
+    "CATEGORY",
+    "SHADE",
+    "SIZE",
+    "SEASON",
+    "MRP",
+    "FIT",
+    "PRINT TYPE",
+    "CLSNG \nQTY",
+    "CLSNG \nVALUE",
+    "QTY \nSALE",
+    "NET \nSALE \nVALUE",
+    "DISCOUNT \nVALUE",
+    "MRP SALE\nVALUE",
+]
+
 PEPE_HEADERS = [
     "Store Name",
     "CITY",
@@ -78,9 +114,21 @@ PEPE_HEADERS = [
 ]
 
 
-def build_workbook(headers, rows):
+# Real sheet names -- both real files are multi-sheet with the
+# transactional data on a non-first sheet, so the seeded upload configs
+# pin an exact sheet_name (validation_rules["sheet_name"]) rather than
+# trusting sheet index 0. Single-sheet fixtures must use these same names
+# or the pipeline (correctly) won't find the configured sheet.
+KILLER_SHEET_NAME = "23-24 TO 25-26 SALE REPORT"
+PEPE_SHEET_NAME = "PEPE DSR- 2026"
+JUNIOR_KILLER_SHEET_NAME = "Sheet1"
+
+
+def build_workbook(headers, rows, sheet_name=None):
     wb = Workbook()
     ws = wb.active
+    if sheet_name:
+        ws.title = sheet_name
     ws.append(headers)
     for row in rows:
         ws.append([row.get(h) for h in headers])
@@ -91,11 +139,34 @@ def build_workbook(headers, rows):
 
 
 def killer_workbook(rows):
-    return build_workbook(KILLER_HEADERS, rows)
+    return build_workbook(KILLER_HEADERS, rows, sheet_name=KILLER_SHEET_NAME)
 
 
 def pepe_workbook(rows):
-    return build_workbook(PEPE_HEADERS, rows)
+    return build_workbook(PEPE_HEADERS, rows, sheet_name=PEPE_SHEET_NAME)
+
+
+def junior_killer_workbook(rows):
+    return build_workbook(JUNIOR_KILLER_HEADERS, rows, sheet_name=JUNIOR_KILLER_SHEET_NAME)
+
+
+def build_multi_sheet_workbook(sheets):
+    """sheets: ordered list of (sheet_name, headers, rows). The first sheet
+    is a decoy that becomes openpyxl's default/active sheet -- proves the
+    pipeline reads the *configured* sheet_name, not sheet index 0, matching
+    both real files' actual shape (summary/other sheets before the real
+    transactional data sheet)."""
+    wb = Workbook()
+    wb.remove(wb.active)
+    for sheet_name, headers, rows in sheets:
+        ws = wb.create_sheet(sheet_name)
+        ws.append(headers)
+        for row in rows:
+            ws.append([row.get(h) for h in headers])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 
 # Real store/product identity, real category/color/season vocabulary, taken
@@ -199,13 +270,44 @@ KILLER_BAD_ROWS = [
     {
         **KILLER_GOOD_ROWS[0],
         "BILL NO \nINVOICE NO": 84,
-        "QTY \nSALE": 1,
-        "NET \nSALE \nVALUE": -2124,  # sign mismatch: positive qty, negative net
+        "QTY \nSALE": -1,
+        "NET \nSALE \nVALUE": -2124,
+        # MRP SALE VALUE stays +2499 (inherited): negative qty + positive
+        # mrp_value has no legitimate real-data match (see validation.py),
+        # unlike the two now-accepted patterns -- qty>0 with mrp_value<0,
+        # or a scheme discount pushing net_value <0 while mrp_value>0.
     },
     {
         **KILLER_GOOD_ROWS[0],
         "BILL NO \nINVOICE NO": 85,
         "NEW DATE": "not-a-date",
+    },
+]
+
+# Two real sign-pattern variants found only when loading the *complete*
+# real Killer file (not the ~10k-row Day 0 sample) -- both are accepted,
+# not rejected, per an explicit product decision (see validation.py).
+KILLER_ALT_SIGN_ROWS = [
+    {
+        # Pattern A: a return recorded with quantity left positive --
+        # mrp_value/net_value negative is what actually signals the return.
+        **KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": 501,
+        "QTY \nSALE": 1,
+        "MRP \nSALE \nVALUE": -2999,
+        "NET \nSALE \nVALUE": -2999,
+        "DISCOUNT \nVALUE": 0,
+    },
+    {
+        # Pattern B: a normal sale where a flat scheme discount (2000)
+        # exceeds the item's mrp_value (1899), pushing net_value negative
+        # while mrp_value stays positive -- not a return.
+        **KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": 502,
+        "QTY \nSALE": 1,
+        "MRP \nSALE \nVALUE": 1899,
+        "DISCOUNT \nVALUE": 2000,
+        "NET \nSALE \nVALUE": -101,
     },
 ]
 
@@ -390,5 +492,116 @@ PEPE_BAD_ROWS = [
         **PEPE_GOOD_ROWS[0],
         "BillNo": "PRHO26-79721",
         "WAD": 0.90,  # supplied discount% wildly disagrees with computed 40%
+    },
+]
+
+# Real store/product identity and header vocabulary from the actual Junior
+# Killer file (kids product line, distinct brand from KILLER despite the
+# near-identical column layout -- JK-prefixed store codes, BRAND="JR
+# KILLER", no F. YEAR column at all).
+JUNIOR_KILLER_GOOD_ROWS = [
+    {
+        "NEW DATE": date(2024, 4, 5),
+        "MONTH": "APRIL",
+        "BILL NO \nINVOICE NO": "0101-0022555",
+        "NAME": "CHANDA MAMA - HAJIPUR",
+        "STORE CODE": "JKESIS011",
+        "CITY": "GAYA",
+        "STATE": "BIHAR",
+        "ZONE": "EAST",
+        "NEW EAN CODE": 8905935224182,
+        "MAIN CATEGORY": "SHIRTS",
+        "ITEM NAME": "001-FS GREAT KKS001FSREFIT LMN",
+        "CATEGORY": "SHIRTS",
+        "SHADE": "LEMON",
+        "SIZE": "11-12 YEARS",
+        "SEASON": "CORE",
+        "MRP": 1299,
+        "FIT": "KKS-001 F/S REGULAR FIT",
+        "PRINT TYPE": "STRIPES",
+        "QTY \nSALE": 1,
+        "NET \nSALE \nVALUE": 1299,
+        "DISCOUNT \nVALUE": 0,
+        "MRP SALE\nVALUE": 1299,
+        "BRAND": "JR KILLER",  # always-unmapped in practice -> extra
+    },
+    {
+        "NEW DATE": date(2024, 4, 12),
+        "MONTH": "APRIL",
+        "BILL NO \nINVOICE NO": "0101-0011246",
+        "NAME": "CHANDA MAMA - HAJIPUR",
+        "STORE CODE": "JKESIS011",
+        "CITY": "GAYA",
+        "STATE": "BIHAR",
+        "ZONE": "EAST",
+        "NEW EAN CODE": 8905935221884,
+        "MAIN CATEGORY": "JEANS",
+        "ITEM NAME": "015-FS STONE KKS001FSREFIT WT",
+        "CATEGORY": "JEANS",
+        "SHADE": "WHITE",
+        "SIZE": "10-11 YEARS",
+        "SEASON": "SS24",
+        "MRP": 1599,
+        "FIT": "KKS-001 F/S REGULAR FIT",
+        "PRINT TYPE": "PRINT",
+        "QTY \nSALE": 1,
+        "NET \nSALE \nVALUE": 1299,
+        "DISCOUNT \nVALUE": 300,
+        "MRP SALE\nVALUE": 1599,
+    },
+    {
+        # Return row: quantity/mrp/net/discount all negative, unit MRP
+        # stays positive (same convention confirmed for Killer at Day 0).
+        "NEW DATE": date(2024, 4, 20),
+        "MONTH": "APRIL",
+        "BILL NO \nINVOICE NO": "0101-0033012",
+        "NAME": "CHANDA MAMA - HAJIPUR",
+        "STORE CODE": "JKESIS011",
+        "CITY": "GAYA",
+        "STATE": "BIHAR",
+        "ZONE": "EAST",
+        "NEW EAN CODE": 8905935224182,
+        "MAIN CATEGORY": "SHIRTS",
+        "ITEM NAME": "001-FS GREAT KKS001FSREFIT LMN",
+        "CATEGORY": "SHIRTS",
+        "SHADE": "LEMON",
+        "SIZE": "11-12 YEARS",
+        "SEASON": "CORE",
+        "MRP": 1299,
+        "FIT": "KKS-001 F/S REGULAR FIT",
+        "PRINT TYPE": "STRIPES",
+        "QTY \nSALE": -1,
+        "NET \nSALE \nVALUE": -1299,
+        "DISCOUNT \nVALUE": 0,
+        "MRP SALE\nVALUE": -1299,
+    },
+]
+
+# One deliberate error each: missing barcode, zero quantity, sign mismatch
+# (negative qty, positive mrp_value -- the one combination with no
+# legitimate real-data match, see validation.py), unparseable date.
+JUNIOR_KILLER_BAD_ROWS = [
+    {
+        **JUNIOR_KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": "0101-0099001",
+        "NEW EAN CODE": None,
+    },
+    {
+        **JUNIOR_KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": "0101-0099002",
+        "QTY \nSALE": 0,
+    },
+    {
+        **JUNIOR_KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": "0101-0099003",
+        "QTY \nSALE": -1,
+        "NET \nSALE \nVALUE": -1299,
+        # MRP SALE VALUE stays +1299 (inherited): negative qty + positive
+        # mrp_value has no legitimate real-data match.
+    },
+    {
+        **JUNIOR_KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": "0101-0099004",
+        "NEW DATE": "not-a-date",
     },
 ]
