@@ -70,36 +70,30 @@ def validate_rows(
                 )
             )
 
-        # discount_value (= mrp_value - net_value) is deliberately excluded
-        # from this check: verified against the real Pepe file, a sale can
-        # legitimately have net_value > mrp_value (a markup/premium, or
-        # paisa-level rounding noise), which makes discount_value negative
-        # on an otherwise perfectly normal sale row. Only quantity, mrp_value,
-        # and net_value need to agree on sign (confirmed empirically, Day 0).
-        if quantity is not None and None not in (mrp_value, net_value):
-            is_return = quantity < 0
-            for label, value in (
-                ("mrp_value", mrp_value),
-                ("net_value", net_value),
-            ):
-                if is_return and value > 0:
-                    errors.append(
-                        IngestionError(
-                            row_no,
-                            label,
-                            value,
-                            "positive value on a return row (quantity < 0); expected non-positive",
-                        )
+        # discount_value and net_value are both deliberately excluded from
+        # this check now. Verified against the complete real Killer file
+        # (not just the ~10k-row Day 0 sample), production data has THREE
+        # legitimate sign patterns, not one: (1) the original convention --
+        # quantity/mrp_value/net_value all negative for a return; (2) a
+        # second real return convention -- quantity stays positive but
+        # mrp_value (and net_value) go negative; (3) a normal sale where a
+        # flat scheme/coupon discount exceeds the item's mrp_value, making
+        # net_value negative while mrp_value stays positive (net_value =
+        # mrp_value - discount_value, and discount_value can exceed
+        # mrp_value). So only quantity and mrp_value together decide
+        # is_return; net_value's sign is never checked against it. The one
+        # sign combination with no legitimate real-data match: a negative
+        # quantity with a positive mrp_value.
+        if quantity is not None and mrp_value is not None:
+            if quantity < 0 and mrp_value > 0:
+                errors.append(
+                    IngestionError(
+                        row_no,
+                        "mrp_value",
+                        mrp_value,
+                        "positive value on a return row (quantity < 0); expected non-positive",
                     )
-                if not is_return and value < 0:
-                    errors.append(
-                        IngestionError(
-                            row_no,
-                            label,
-                            value,
-                            "negative value on a sale row (quantity > 0); expected non-negative",
-                        )
-                    )
+                )
 
         if mrp_value and net_value is not None:
             computed_discount_pct = (1 - (net_value / mrp_value)) * 100

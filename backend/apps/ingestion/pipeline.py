@@ -27,16 +27,30 @@ class PipelineResult:
     rows: list[dict] | None = None  # only set when ok
 
 
-def run_pipeline(brand, config, fileobj, filename: str) -> PipelineResult:
-    headers, raw_rows = parsing.read_source_file(fileobj, filename)
+@dataclass
+class ParsedRows:
+    canonical_rows: list[dict]
+    errors: list[IngestionError]
+
+
+def parse_map_validate(brand, config, fileobj, filename: str) -> ParsedRows:
+    """Phase A only: parse -> map -> coerce -> validate, with no DB writes
+    and no all-or-nothing gate. Shared by run_pipeline (which gates Phase B
+    on zero errors, per Day 5) and apps.ingestion.backfill (which instead
+    loads whatever subset of rows has zero errors -- a deliberately
+    different, explicitly opt-in policy for one-time historical backfill,
+    not a relaxation of the regular upload path's guarantee).
+    """
+    sheet_name = config.validation_rules.get("sheet_name")
+    headers, raw_rows = parsing.read_source_file(fileobj, filename, sheet_name=sheet_name)
     mapped, unmapped = resolve_columns(headers, config.column_map)
 
     derived_fields = config.validation_rules.get("derived_fields", {})
     required_fields = config.validation_rules.get("required_canonical_fields", [])
     missing_required = [f for f in required_fields if f not in mapped and f not in derived_fields]
     if missing_required:
-        return PipelineResult(
-            ok=False,
+        return ParsedRows(
+            canonical_rows=[],
             errors=[
                 IngestionError(0, field_name, None, "required column not found in file")
                 for field_name in missing_required
@@ -57,7 +71,13 @@ def run_pipeline(brand, config, fileobj, filename: str) -> PipelineResult:
             canonical["extra"] = extra
             canonical = apply_derived_fields(canonical, config.validation_rules)
             if canonical.get("quantity") is not None:
-                canonical["is_return"] = canonical["quantity"] < 0
+                mrp_value = canonical.get("mrp_value")
+                # A return can also show up as a positive quantity with a
+                # negative mrp_value (see validation.py) -- money sign is
+                # what actually signals a return in that convention.
+                canonical["is_return"] = canonical["quantity"] < 0 or (
+                    mrp_value is not None and mrp_value < 0
+                )
             chunk_canonical.append(canonical)
 
         all_errors.extend(
@@ -65,9 +85,15 @@ def run_pipeline(brand, config, fileobj, filename: str) -> PipelineResult:
         )
         canonical_rows.extend(chunk_canonical)
 
-    if all_errors:
-        return PipelineResult(ok=False, errors=all_errors)
+    return ParsedRows(canonical_rows=canonical_rows, errors=all_errors)
 
+
+def run_pipeline(brand, config, fileobj, filename: str) -> PipelineResult:
+    parsed = parse_map_validate(brand, config, fileobj, filename)
+    if parsed.errors:
+        return PipelineResult(ok=False, errors=parsed.errors)
+
+    canonical_rows = parsed.canonical_rows
     store_ids = dimension_resolver.resolve_stores(brand, canonical_rows)
     product_ids = dimension_resolver.resolve_products(brand, canonical_rows)
     for row in canonical_rows:
