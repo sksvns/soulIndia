@@ -521,6 +521,51 @@ calendar order -- current/recent seasons (`AW22`->`SS23`->`AW23`->
 
 ## Day 9 — Frontend shell + Dashboard view
 
+**Status:** ✅ Done (2026-07-07). React/Vite scaffold replaced with the
+real app: AntD + ECharts + React Router + axios. JWT auth end to end
+(access/refresh in localStorage, a request interceptor attaching the
+bearer token, a response interceptor transparently refreshing on 401 with
+a single in-flight refresh shared across concurrent 401s, hard redirect
+to `/login` only if the refresh itself fails). `AuthContext` exposes
+`hasPermission(...)` for capability-based route/UI gating -- same RBAC
+model as the backend, never a role-name check. `ProtectedRoute` redirects
+unauthenticated visitors to `/login` (preserving the originally-requested
+path) and supports an optional `requirePermission` for role-gated routes
+in later days.
+
+`AppLayout` is the real shell: collapsible Sider nav (Dashboard/Stores/
+Categories/Trends/Upload -- the four beyond Dashboard are explicit
+placeholders, not broken links, ahead of Days 10-11), a Header with the
+logged-in user and logout. `FilterContext` holds the selected brand plus
+every documented filter in one object keyed exactly like
+`apps/analytics/views.py`'s `FILTER_PARAM_NAMES`, so it spreads straight
+into a request's query params. `FilterBar` renders brand as a real Select
+(new `GET /api/masterdata/brands/` -- masterdata had no views/urls at all
+before this), month and discount_range as Selects (genuinely fixed
+enums), everything else as free-text inputs -- there's no "distinct
+values for this filter" endpoint yet, a known, deliberate gap, not an
+oversight. `DashboardPage` calls Day 8's `GET /api/analytics/dashboard/`
+with the selected brand + active filters, showing four stat cards
+(Quantity Sold, MRP Sales, Net Sales, Total Discount) and an ECharts
+grouped bar chart of MRP/Net/Discount by season, with a live/cached tag
+surfacing Day 7's cache-aside behavior directly in the UI.
+
+**Verified in a real browser, not just build/lint:** no browser
+automation tool was available directly, so Playwright was driven manually
+via a headless Chromium (downloaded despite a flaky sandbox network that
+took several retries) against the actual running dev server, with real
+data from all three loaded brands. Confirmed: logged-out visit redirects
+to `/login`; login as Super Admin lands on the dashboard with real brand
+options (Killer/Pepe/Junior Killer) and real numbers; switching brand and
+typing a `financial_year` filter both live-update every stat card and the
+chart; nav to a placeholder route doesn't crash; logout redirects to
+`/login` and the guard holds on a fresh navigation afterward (not just
+in-memory state). Caught and fixed one real bug this surfaced: `logout()`
+cleared `localStorage` before calling the authenticated blacklist
+endpoint, so that call always 401'd -- reordered to blacklist first,
+clear after. Also fixed an ECharts legend/x-axis-label overlap found in
+the first screenshot.
+
 **Goals:** usable app with the main dashboard.
 
 **Tasks**
