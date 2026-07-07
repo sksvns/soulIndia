@@ -4,6 +4,7 @@
   "date_source": "DATE",
   "header_normalization": "trim, collapse internal whitespace/newlines to a single space, uppercase",
   "source_file_reference": "PEPE BIHAR DSR REPORT 2026.xlsb, sheet 'PEPE DSR- 2026'",
+  "sheet_name": "PEPE DSR- 2026",
   "column_map": {
     "sale_date": { "source": ["DATE"], "cast": "excel_serial_date", "required": true },
     "month": { "source": ["MONTH"], "cast": "str", "trusted_as_supplied": true },
@@ -49,7 +50,7 @@
       "sale_date", "invoice_no", "store_code", "barcode",
       "unit_mrp", "quantity", "mrp_value", "net_value", "discount_value"
     ],
-    "is_return_when": "quantity < 0",
+    "is_return_when": "quantity < 0 OR mrp_value < 0 (real data has both return conventions)",
     "discount_pct_tolerance_pct": 2.0,
     "divide_by_zero_guard": "if mrp_value == 0, discount_pct is null, not an error",
     "notes": [

@@ -19,13 +19,26 @@ ENGINE_BY_EXTENSION = {
 }
 
 
-def read_source_file(fileobj, filename: str) -> tuple[list[str], list[dict]]:
+def read_source_file(
+    fileobj, filename: str, sheet_name: str | None = None
+) -> tuple[list[str], list[dict]]:
+    """sheet_name picks a specific sheet out of a multi-sheet workbook (both
+    real Killer and Pepe files are multi-sheet, with the transactional data
+    on a non-first sheet -- 'SUMMARY'/'23-24 TO 25-26 SALE REPORT' for
+    Killer, 5 sheets before 'PEPE DSR- 2026' for Pepe). Falls back to
+    pandas' own default (sheet index 0) when not configured, so single-sheet
+    fixtures/files are unaffected."""
     extension = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     if extension == ".csv":
         df = pd.read_csv(fileobj, dtype=object)
     elif extension in ENGINE_BY_EXTENSION:
-        df = pd.read_excel(fileobj, dtype=object, engine=ENGINE_BY_EXTENSION[extension])
+        df = pd.read_excel(
+            fileobj,
+            dtype=object,
+            engine=ENGINE_BY_EXTENSION[extension],
+            sheet_name=sheet_name if sheet_name else 0,
+        )
     else:
         raise ValueError(f"unsupported file extension: {extension!r}")
 

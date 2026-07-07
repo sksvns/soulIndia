@@ -15,6 +15,10 @@ backend/**/media/
 db.sqlite3
 *.log
 
+# Operational output (real business data from ad hoc backfill runs) --
+# regenerable on demand from the batch's error_report_key, not source.
+backend/backfill_reports/
+
 # Node / frontend
 node_modules/
 frontend/dist/

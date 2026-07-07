@@ -4,6 +4,7 @@
   "date_source": "NEW DATE",
   "header_normalization": "trim, collapse internal whitespace/newlines to a single space, uppercase",
   "source_file_reference": "KILLER - EAN CODE WISE SALE 23-24 TO 25-26.xlsb, sheet '23-24 TO 25-26 SALE REPORT'",
+  "sheet_name": "23-24 TO 25-26 SALE REPORT",
   "column_map": {
     "sale_date": { "source": ["NEW DATE"], "cast": "excel_serial_date", "required": true },
     "month": { "source": ["MONTH"], "cast": "str", "trusted_as_supplied": true },
@@ -46,7 +47,7 @@
       "sale_date", "invoice_no", "store_code", "barcode",
       "unit_mrp", "quantity", "mrp_value", "net_value", "discount_value"
     ],
-    "is_return_when": "quantity < 0",
+    "is_return_when": "quantity < 0 OR mrp_value < 0 (real data has both return conventions)",
     "discount_pct_tolerance_pct": 2.0,
     "divide_by_zero_guard": "if mrp_value == 0, discount_pct is null, not an error",
     "notes": [
