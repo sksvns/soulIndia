@@ -48,3 +48,25 @@ def presigned_url(key: str, expires_in: int = 3600) -> str:
         Params={"Bucket": settings.OBJECT_STORAGE_BUCKET, "Key": key},
         ExpiresIn=expires_in,
     )
+
+
+def list_keys(prefix: str) -> list[str]:
+    """Used by manage.py backup_database for retention cleanup -- lists
+    every object under a prefix, paginating past S3's 1000-key-per-call cap."""
+    client = _client()
+    keys = []
+    continuation_token = None
+    while True:
+        kwargs = {"Bucket": settings.OBJECT_STORAGE_BUCKET, "Prefix": prefix}
+        if continuation_token:
+            kwargs["ContinuationToken"] = continuation_token
+        response = client.list_objects_v2(**kwargs)
+        keys.extend(obj["Key"] for obj in response.get("Contents", []))
+        if not response.get("IsTruncated"):
+            break
+        continuation_token = response["NextContinuationToken"]
+    return keys
+
+
+def delete(key: str) -> None:
+    _client().delete_object(Bucket=settings.OBJECT_STORAGE_BUCKET, Key=key)

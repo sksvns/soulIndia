@@ -1,0 +1,30 @@
+# Production reverse proxy + TLS. Caddy auto-provisions and renews a
+# Let's Encrypt certificate for {$DOMAIN} the first time it's reachable on
+# ports 80/443 from the internet -- no certbot dance, no manual renewal
+# cron. If DOMAIN isn't a public hostname yet (unset, "localhost", a bare
+# IP), Caddy transparently falls back to its own internal CA instead of
+# attempting Let's Encrypt, which is what makes this exact file testable
+# locally before a real domain exists.
+{$DOMAIN} {
+	encode gzip
+
+	# Django admin's CSS/JS: gunicorn doesn't serve STATIC_ROOT itself, so
+	# entrypoint.sh runs collectstatic into a volume Caddy serves directly
+	# -- handle_path strips the /static prefix to match STATIC_ROOT's
+	# on-disk layout (STATIC_URL is "static/").
+	handle_path /static/* {
+		root * /srv/static
+		file_server
+	}
+
+	@backend path /api/* /admin/* /health/*
+	handle @backend {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+}

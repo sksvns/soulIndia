@@ -1,11 +1,16 @@
+## Base services shared by every environment -- no host ports and no
+## bind-mounted source here; those are dev-only conveniences that live in
+## docker-compose.override.yml (auto-loaded by plain `docker compose up`)
+## and must NOT leak into production, where internal services (Postgres,
+## Redis, MinIO) should never be reachable from outside the compose network.
+## Production-only pieces (Caddy/TLS, static frontend build, restart
+## policies, worker tuning) live in docker-compose.prod.yml.
 services:
   db:
     image: postgres:16
     env_file: .env
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-retail_analytics}"]
       interval: 5s
@@ -14,8 +19,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -30,9 +33,6 @@ services:
       MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_KEY:-minioadmin}
     volumes:
       - minio_data:/data
-    ports:
-      - "9000:9000"
-      - "9001:9001"
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -53,10 +53,6 @@ services:
   backend:
     build: ./backend
     env_file: .env
-    volumes:
-      - ./backend:/app
-    ports:
-      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -68,8 +64,6 @@ services:
   celery:
     build: ./backend
     env_file: .env
-    volumes:
-      - ./backend:/app
     entrypoint: []
     command: ["celery", "-A", "core", "worker", "-l", "info"]
     depends_on:
@@ -80,28 +74,6 @@ services:
       minio:
         condition: service_healthy
 
-  frontend:
-    build: ./frontend
-    env_file: .env
-    volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-    ports:
-      - "5173:5173"
-    depends_on:
-      - backend
-
-  nginx:
-    image: nginx:alpine
-    volumes:
-      - ./ops/nginx/dev.conf:/etc/nginx/conf.d/default.conf:ro
-    ports:
-      - "80:80"
-    depends_on:
-      - backend
-      - frontend
-
 volumes:
   pgdata:
-  frontend_node_modules:
   minio_data:

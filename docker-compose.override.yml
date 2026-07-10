@@ -1,0 +1,53 @@
+## Auto-loaded by `docker compose up` alongside docker-compose.yml -- dev
+## conveniences only (host ports for direct access/debugging, bind-mounted
+## source for live-reload, the Vite dev server, and the plain-HTTP nginx
+## front door). None of this applies in production: run with
+## `docker compose -f docker-compose.yml -f docker-compose.prod.yml ...`
+## instead, which does not load this file.
+services:
+  db:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  backend:
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+
+  celery:
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build: ./frontend
+    env_file: .env
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./ops/nginx/dev.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  frontend_node_modules:
