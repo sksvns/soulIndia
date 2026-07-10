@@ -3,6 +3,49 @@ import io
 from apps.ingestion import storage
 
 
+def test_client_omits_endpoint_and_credentials_when_unset(settings, monkeypatch):
+    """Real AWS S3 needs boto3 to resolve its own regional endpoint, and an
+    EC2 IAM instance role needs boto3's default credential chain -- both
+    only happen when these kwargs are absent entirely, not passed as
+    None/empty (which would override the defaults with "no endpoint" /
+    "no credentials" instead of "figure it out yourself")."""
+    settings.OBJECT_STORAGE_ENDPOINT_URL = None
+    settings.OBJECT_STORAGE_ACCESS_KEY = None
+    settings.OBJECT_STORAGE_SECRET_KEY = None
+    captured = {}
+
+    def fake_client(service, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(storage.boto3, "client", fake_client)
+
+    storage._client()
+
+    assert "endpoint_url" not in captured
+    assert "aws_access_key_id" not in captured
+    assert "aws_secret_access_key" not in captured
+
+
+def test_client_passes_endpoint_and_credentials_when_set(settings, monkeypatch):
+    settings.OBJECT_STORAGE_ENDPOINT_URL = "http://minio:9000"
+    settings.OBJECT_STORAGE_ACCESS_KEY = "minioadmin"
+    settings.OBJECT_STORAGE_SECRET_KEY = "minioadmin"
+    captured = {}
+
+    def fake_client(service, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(storage.boto3, "client", fake_client)
+
+    storage._client()
+
+    assert captured["endpoint_url"] == "http://minio:9000"
+    assert captured["aws_access_key_id"] == "minioadmin"
+    assert captured["aws_secret_access_key"] == "minioadmin"
+
+
 def test_build_upload_key_is_unique_and_namespaced_by_brand_and_product_line():
     key1 = storage.build_upload_key("KILLER", "menswear", "april.xlsx")
     key2 = storage.build_upload_key("KILLER", "menswear", "april.xlsx")

@@ -15,14 +15,23 @@ from django.conf import settings
 
 
 def _client():
-    return boto3.client(
-        "s3",
-        endpoint_url=settings.OBJECT_STORAGE_ENDPOINT_URL,
-        aws_access_key_id=settings.OBJECT_STORAGE_ACCESS_KEY,
-        aws_secret_access_key=settings.OBJECT_STORAGE_SECRET_KEY,
-        region_name=settings.OBJECT_STORAGE_REGION,
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
-    )
+    kwargs = {
+        "region_name": settings.OBJECT_STORAGE_REGION,
+        "config": Config(
+            signature_version="s3v4",
+            s3={"addressing_style": settings.OBJECT_STORAGE_ADDRESSING_STYLE},
+        ),
+    }
+    # Omit rather than pass None/empty -- boto3 only falls back to its own
+    # endpoint resolution (real AWS S3) and default credential chain (IAM
+    # instance role, no static keys) when these kwargs are absent entirely,
+    # not just falsy.
+    if settings.OBJECT_STORAGE_ENDPOINT_URL:
+        kwargs["endpoint_url"] = settings.OBJECT_STORAGE_ENDPOINT_URL
+    if settings.OBJECT_STORAGE_ACCESS_KEY:
+        kwargs["aws_access_key_id"] = settings.OBJECT_STORAGE_ACCESS_KEY
+        kwargs["aws_secret_access_key"] = settings.OBJECT_STORAGE_SECRET_KEY
+    return boto3.client("s3", **kwargs)
 
 
 def build_upload_key(brand_code: str, product_line: str, original_filename: str) -> str:

@@ -193,11 +193,20 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
 }
 
-OBJECT_STORAGE_ENDPOINT_URL = os.environ.get("OBJECT_STORAGE_ENDPOINT_URL", "http://minio:9000")
-OBJECT_STORAGE_ACCESS_KEY = os.environ.get("OBJECT_STORAGE_ACCESS_KEY", "minioadmin")
-OBJECT_STORAGE_SECRET_KEY = os.environ.get("OBJECT_STORAGE_SECRET_KEY", "minioadmin")
+# Unset (rather than defaulting to the MinIO container hostname) so real
+# AWS S3 -- where boto3 must resolve its own regional endpoint -- and IAM
+# instance-role credentials (no static keys at all) both work correctly.
+# Dev's .env always sets these explicitly (see .env.example), so this
+# only changes behavior when a var is genuinely absent, e.g. real S3 in
+# prod (see .env.prod.example).
+OBJECT_STORAGE_ENDPOINT_URL = os.environ.get("OBJECT_STORAGE_ENDPOINT_URL") or None
+OBJECT_STORAGE_ACCESS_KEY = os.environ.get("OBJECT_STORAGE_ACCESS_KEY") or None
+OBJECT_STORAGE_SECRET_KEY = os.environ.get("OBJECT_STORAGE_SECRET_KEY") or None
 OBJECT_STORAGE_BUCKET = os.environ.get("OBJECT_STORAGE_BUCKET", "retail-analytics-uploads")
 OBJECT_STORAGE_REGION = os.environ.get("OBJECT_STORAGE_REGION", "auto")
+# MinIO requires "path" (bucket-in-path) addressing; real AWS S3 wants
+# "auto" (virtual-hosted-style, which boto3 picks correctly on its own).
+OBJECT_STORAGE_ADDRESSING_STYLE = os.environ.get("OBJECT_STORAGE_ADDRESSING_STYLE", "path")
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
