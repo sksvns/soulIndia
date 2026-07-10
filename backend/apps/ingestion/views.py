@@ -15,7 +15,7 @@ from . import storage
 from .models import UploadBatch
 from .permissions import DjangoModelPermissionsIncludingView
 from .serializers import UploadBatchSerializer
-from .tasks import process_backfill_batch, process_upload_batch
+from .tasks import process_upload_batch
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,10 @@ UPLOAD_REQUEST_SERIALIZER = inline_serializer(
 
 def _intake_upload(request):
     """Shared file/brand/config validation + immutable raw-file storage for
-    both the regular upload and backfill endpoints -- everything up to "a
-    batch row exists and the raw bytes are safely in object storage" is
-    identical between the two; only what happens *after* (all-or-nothing
-    vs. load-good-report-bad) differs.
+    both the regular upload and backfill endpoints -- both now run the
+    exact same load-good-report-bad processing (apps.ingestion.tasks.
+    process_upload_batch); the only real difference left between the two
+    endpoints is /backfill/'s Super-Admin permission requirement.
 
     Returns (batch, None) on success, or (None, error_response) on a
     request-shape problem (never touches the DB or storage in that case).
@@ -118,14 +118,15 @@ class UploadCreateView(APIView):
 
 
 class BackfillUploadView(APIView):
-    """One-time historical backfill (apps.ingestion.backfill): same request
-    shape as the regular upload, but loads every row that passes Phase A
-    validation and reports the rest in a downloadable CSV, instead of
-    failing the whole file on any error. Deliberately gated behind
-    ingestion.alter_existing_data (Super Admin) -- this bypasses the
-    all-or-nothing data-quality gate the regular endpoint always enforces,
-    so triggering it is at least as sensitive as altering already-loaded
-    data (ADR-0003), not a routine Data Inserter action.
+    """Historically a separate Super-Admin-only path for one-time backfill
+    (apps.ingestion.backfill, ADR-0005); the regular /uploads/ endpoint now
+    runs the exact same load-good-report-bad processing for every upload,
+    so this endpoint is behaviorally identical to it today, just still
+    gated behind ingestion.alter_existing_data (Super Admin). Kept as a
+    distinct URL for anything already calling it directly rather than
+    removed outright; a Data Inserter gets the same load-good-report-bad
+    result from the regular /uploads/ endpoint without needing this
+    permission at all.
     """
 
     queryset = UploadBatch.objects.all()
@@ -151,7 +152,7 @@ class BackfillUploadView(APIView):
             batch.config.product_line,
             request.user.email,
         )
-        process_backfill_batch.delay(batch.batch_id)
+        process_upload_batch.delay(batch.batch_id)
 
         return Response(UploadBatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 

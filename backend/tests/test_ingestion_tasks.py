@@ -91,6 +91,35 @@ def test_process_upload_batch_on_a_bad_file_creates_no_dimension_rows(
 
 
 @pytest.mark.django_db
+def test_process_upload_batch_on_a_mixed_file_loads_good_rows_and_reports_bad_ones(
+    killer_brand_and_config, data_inserter_user
+):
+    """The regular upload path used to be all-or-nothing (any bad row
+    failed the whole file); it now loads whatever rows pass and reports
+    the rest, same as the one-time backfill path -- available to a plain
+    Data Inserter, no Super Admin permission required."""
+    from apps.ingestion.models import FactSales
+
+    brand, config = killer_brand_and_config
+    mixed_rows = KILLER_GOOD_ROWS + KILLER_BAD_ROWS
+    batch = _upload_and_create_batch(
+        brand, config, data_inserter_user, killer_workbook(mixed_rows), "mixed.xlsx"
+    )
+
+    process_upload_batch(batch.batch_id)
+
+    batch.refresh_from_db()
+    assert batch.status == UploadBatch.Status.LOADED
+    assert batch.row_count == len(KILLER_GOOD_ROWS)
+    assert batch.error_count >= len(KILLER_BAD_ROWS)
+    assert batch.error_report_key is not None
+    assert FactSales.objects.filter(batch=batch).count() == len(KILLER_GOOD_ROWS)
+
+    report_bytes = storage.get(batch.error_report_key).read().decode()
+    assert "row_no,field,value,reason" in report_bytes
+
+
+@pytest.mark.django_db
 def test_process_upload_batch_never_gets_silently_stuck_on_an_unexpected_error(
     killer_brand_and_config, data_inserter_user
 ):
@@ -102,7 +131,9 @@ def test_process_upload_batch_never_gets_silently_stuck_on_an_unexpected_error(
         brand, config, data_inserter_user, killer_workbook(KILLER_GOOD_ROWS), "april.xlsx"
     )
 
-    with patch("apps.ingestion.tasks.run_pipeline", side_effect=RuntimeError("boom: disk on fire")):
+    with patch(
+        "apps.ingestion.tasks.execute_backfill", side_effect=RuntimeError("boom: disk on fire")
+    ):
         with pytest.raises(RuntimeError):
             process_upload_batch(batch.batch_id)
 

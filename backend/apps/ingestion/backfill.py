@@ -1,18 +1,23 @@
-"""One-time historical backfill (plan.md Day 12: "load real historical
-files per brand"), deliberately separate from the regular upload path.
+"""Load-good-report-bad ingestion (originally built for one-time historical
+backfill, plan.md Day 12: "load real historical files per brand" -- see
+ADR-0005 for that history). Confirmed loading the actual production Killer
+file: 11,760 of 748,161 rows (1.6%) had genuine data-quality issues, and
+blocking the *entire* load on every row being perfect first would withhold
+revenue history the client already has elsewhere for an indefinite
+correction cycle. So this module parses+validates the whole file (the
+same Phase A used everywhere else), loads every row that passes, and
+reports every row that doesn't in one CSV -- nothing is silently dropped,
+it's just reported instead of blocking the rest.
 
-The regular upload API (pipeline.run_pipeline, tasks.process_upload_batch)
-is all-or-nothing: any row error fails the whole file, nothing loads
-(plan.md Day 5). That guarantee stays exactly as-is for routine monthly
-uploads/corrections. A historical backfill of a client's existing export is
-a different situation: the file already has years of real data-quality
-debt baked in (confirmed loading the actual production Killer file -- see
-docs/plan.md), and blocking the *entire* historical load on every row being
-perfect would mean withholding revenue history the client already has
-elsewhere while every row gets corrected by hand. So this module instead
-loads every row that passes the exact same Phase A validation used
-everywhere else, and reports every row that doesn't in one CSV -- nothing
-is silently dropped, it's just reported instead of blocking the rest.
+`process_upload_batch` (apps.ingestion.tasks) now uses this for every
+upload, not just backfill -- ADR-0005 originally scoped this to a
+Super-Admin-only /backfill/ endpoint, kept separate from the regular
+/uploads/ endpoint's all-or-nothing behavior; that scoping decision was
+later reversed (any bad row was rejecting entire real files with only a
+handful of bad rows in them, which wasn't the intended day-to-day
+experience). `run_pipeline` in pipeline.py -- the original all-or-nothing
+gate -- still exists and is still tested/used directly by pipeline-level
+tests, it's just no longer what the upload endpoints call.
 """
 
 import io
@@ -62,12 +67,14 @@ def run_backfill_pipeline(brand, config, fileobj, filename: str) -> BackfillResu
 
 
 def execute_backfill(batch: UploadBatch) -> BackfillResult:
-    """Shared orchestration for both the backfill_historical management
-    command and the async backfill/ API endpoint: parse+validate the raw
-    file already sitting at batch.object_key, load whatever rows pass, and
-    leave the batch's status/row_count/error_count/error_report_key/slices
-    fully reflecting the outcome either way. Callers only need to create
-    the batch (with the raw file already stored) and interpret the result.
+    """Shared orchestration for the backfill_historical management command
+    and both the regular /uploads/ and Super-Admin-only /backfill/ API
+    endpoints (via apps.ingestion.tasks.process_upload_batch): parse+
+    validate the raw file already sitting at batch.object_key, load
+    whatever rows pass, and leave the batch's status/row_count/error_count/
+    error_report_key/slices fully reflecting the outcome either way.
+    Callers only need to create the batch (with the raw file already
+    stored) and interpret the result.
 
     A permission rejection (ADR-0003 -- this batch would replace/touch a
     slice that already has data, and the uploader lacks
