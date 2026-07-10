@@ -160,11 +160,15 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build \
   --scale minio=0 --scale minio-init=0
 ```
 
-Then follow `ops/runbooks/deploy.md` from step 5 onward (seed the
-initial Super Admin, set up the nightly backup cron job, confirm
+Then follow `ops/runbooks/deploy.md` from step 5 onward -- seed the
+initial Super Admin, **then seed master data** (`seed_calendar`,
+`seed_brands`, `seed_upload_configs`, `seed_attribute_registry` -- a
+fresh database has none of this, and the Upload page's Brand/Product
+Line selects silently stay empty with the Upload button disabled until
+it's run), set up the nightly backup cron job, and confirm
 `https://<ELASTIC_IP>/health/` -- accept the browser's self-signed
 certificate warning once, matching what's expected per the note at the
-top of this file).
+top of this file.
 
 ## Adding a real domain later
 
