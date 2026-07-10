@@ -52,3 +52,57 @@ export interface Filters {
   gender?: string
   discount_range?: string
 }
+
+export type OrderBy = 'net' | 'mrp' | 'quantity' | 'discount_pct'
+
+export interface StorePerfRow {
+  store_id: number
+  store_code: string
+  store_name: string
+  city: string | null
+  zone: string | null
+  mrp_value: number
+  net_value: number
+  discount_value: number
+  quantity: number
+  discount_pct: number | null
+}
+
+export interface CategoryPerfRow {
+  category: string | null
+  sub_category: string | null
+  mrp_value: number
+  net_value: number
+  discount_value: number
+  quantity: number
+  discount_pct: number | null
+}
+
+export interface UploadConfig {
+  brand_code: string
+  product_line: string
+  name: string
+}
+
+export type UploadStatus =
+  | 'received'
+  | 'parsing'
+  | 'validating'
+  | 'failed'
+  | 'loaded'
+  | 'rolled_back'
+
+export interface UploadBatch {
+  batch_id: number
+  brand_code: string
+  file_name: string
+  status: UploadStatus
+  row_count: number | null
+  error_count: number | null
+  slices: unknown[]
+  error_report_key: string | null
+  failure_reason: string | null
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+}
