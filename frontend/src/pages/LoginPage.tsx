@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate, Navigate } from 'react-router-dom'
 import { Form, Input, Button, Card, Typography, Alert } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
+import { isAxiosError } from 'axios'
 import { useAuth } from '../auth/AuthContext'
 
 interface LoginForm {
@@ -27,8 +28,12 @@ export function LoginPage() {
     try {
       await login(values.email, values.password)
       navigate('/', { replace: true })
-    } catch {
-      setError('Invalid email or password.')
+    } catch (err) {
+      if (isAxiosError(err) && err.response?.status === 401) {
+        setError('Invalid email or password.')
+      } else {
+        setError('Could not reach the server. Please try again.')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -48,12 +53,15 @@ export function LoginPage() {
         <Typography.Title level={3} style={{ textAlign: 'center', marginBottom: 24 }}>
           Retail Analytics
         </Typography.Title>
-        {error && <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />}
+        {error && <Alert type="error" title={error} showIcon style={{ marginBottom: 16 }} />}
         <Form<LoginForm> layout="vertical" onFinish={onFinish} disabled={submitting}>
           <Form.Item
             name="email"
             label="Email"
-            rules={[{ required: true, message: 'Email is required' }]}
+            rules={[
+              { required: true, message: 'Email is required' },
+              { type: 'email', message: 'Enter a valid email address' },
+            ]}
           >
             <Input prefix={<UserOutlined />} autoComplete="email" autoFocus />
           </Form.Item>

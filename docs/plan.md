@@ -639,6 +639,50 @@ to scope around explicitly.
 
 ## Day 11 — Trends UI, hardening, load test
 
+**Status:** ✅ Done (2026-07-11). `TrendsPage` adds Store/Category entity
+Segmented, YoY/MoM/Season dimension Segmented, and a Net/MRP/Quantity
+metric Select, wired to the new `/api/analytics/trends/stores/` and
+`/trends/categories/` endpoints; an ECharts line+area chart renders the
+series with a shared `formatMetric()` helper (quantity uses plain
+grouping, currency uses `formatINR`) applied to both the tooltip and the
+y-axis. A new `frontend/src/utils/format.ts`
+(`formatINR`/`formatNumber` via `Intl.NumberFormat('en-IN', ...)`)
+replaced the ad hoc `INR` consts scattered across Dashboard/Stores/
+Categories, guaranteeing consistent lakh/crore digit grouping everywhere.
+Empty/loading/error states were made explicit throughout (a three-way
+loading → data → empty check on Trends, rather than treating "no data
+yet" and "still loading" as the same case), and `LoginPage` gained email
+format validation and a real invalid-credentials message.
+
+Browser verification (Playwright, real login → dashboard → all Trends
+toggle combinations) caught a genuine bug: the axios response
+interceptor treated the login endpoint's own 401 (wrong password) as a
+stale-session signal, tried a token refresh, and hard-redirected to
+`/login` before the user ever saw the error message. Fixed by excluding
+`/auth/login/` and `/auth/refresh/` from the retry-interceptor's trigger
+condition — those endpoints' own 401s are legitimate rejections, not
+expired-session signals.
+
+Load test: `generate_load_test_data` (numpy-vectorized generation +
+direct `COPY` into a dedicated `LOADTEST_*` brand, bypassing the
+Excel-parse pipeline entirely since this measures query/MV/cache
+performance, not ingestion correctness) produced 36,000,000 synthetic
+rows across 3 brands (300 stores/8,000 products/3 FYs each), for a
+36,792,391-row dataset combined with the real brands. Every query type
+was comfortably inside target except `category_perf_top10` (up to 580ms
+on the largest synthetic brand, 152ms even on the real Killer brand) —
+root-caused via `EXPLAIN (ANALYZE, BUFFERS)` to `mv_category_perf`'s
+store_id-inclusive grain forcing per-row heap fetches. Fixed with a
+covering index (migration `0003_category_perf_covering_index`,
+`CREATE INDEX CONCURRENTLY ... INCLUDE (mrp_value, net_value,
+discount_value, quantity)`) enabling an Index Only Scan: real Killer
+152ms → 8-24ms (13-19x), synthetic 300-store brands ~570ms → 118-245ms
+(~3x). Full methodology, before/after numbers, and the residual-cost
+reasoning for the synthetic extreme are in `docs/load-test.md`. The
+three `LOADTEST_*` brands were deactivated post-measurement so they no
+longer appear in the live brand selector, keeping their rows for
+reproducibility without regenerating 36M rows.
+
 **Goals:** finish features; prove performance at realistic scale.
 
 **Tasks**

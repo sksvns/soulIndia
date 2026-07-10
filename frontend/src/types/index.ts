@@ -55,6 +55,14 @@ export interface Filters {
 
 export type OrderBy = 'net' | 'mrp' | 'quantity' | 'discount_pct'
 
+export type TrendDimension = 'financial_year' | 'month' | 'season'
+export type TrendMetric = 'net' | 'mrp' | 'quantity'
+
+export interface TrendPoint {
+  label: string
+  value: number
+}
+
 export interface StorePerfRow {
   store_id: number
   store_code: string
