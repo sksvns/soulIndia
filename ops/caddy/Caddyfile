@@ -5,6 +5,21 @@
 # IP), Caddy transparently falls back to its own internal CA instead of
 # attempting Let's Encrypt, which is what makes this exact file testable
 # locally before a real domain exists.
+#
+# default_sni matters specifically for the bare-IP case: SNI only applies
+# to hostnames (RFC 6066), so a client connecting straight to an IP sends
+# no SNI at all. Caddy's fallback is to match the connection's *local
+# socket address* instead -- which works on a plain VPS, but not behind a
+# cloud NAT (e.g. AWS Elastic IP): the instance's own OS only ever sees
+# its private IP, never the public one the cert was actually issued for,
+# so the handshake fails with "no certificate available for <private
+# IP>". Telling Caddy what SNI to assume when none is given sidesteps
+# that local-address lookup entirely. Harmless once a real domain is set
+# -- real hostnames always send SNI, so this default is simply never used.
+{
+	default_sni {$DOMAIN}
+}
+
 {$DOMAIN} {
 	encode gzip
 

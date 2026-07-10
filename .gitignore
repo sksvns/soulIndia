@@ -33,6 +33,9 @@ frontend/.vite/
 # Docker
 *.pid
 
+# Local AWS deploy artifacts (SSH keys, etc.) -- never commit these
+.aws-deploy/
+
 # OS / editor
 .DS_Store
 .idea/

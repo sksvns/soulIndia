@@ -734,6 +734,24 @@ the exact restore procedure for a real incident, and one known-benign
 `ops/runbooks/restore.md`; the deploy checklist (VPS/DNS prerequisites,
 first-deploy steps, redeploys) is in `ops/runbooks/deploy.md`.
 
+**Update (2026-07-10): actually deployed live to AWS.** A real EC2
+instance (t3.small -- the account's new-account free-tier-only
+restriction ruled out t3.medium), a real S3 bucket, and an IAM instance
+role (no static keys on the box) were provisioned end-to-end. This
+surfaced one genuine bug that no amount of local testing caught: Caddy's
+automatic HTTPS for a bare IP address relies on matching the connection's
+*local socket address* when no SNI is sent (SNI only applies to
+hostnames), and AWS's Elastic IP is NAT'd outside the instance's network
+namespace entirely -- the instance's own OS only ever sees its private
+IP, never the public one the certificate covers, so every HTTPS
+connection failed outright. Fixed with `default_sni {$DOMAIN}` in
+`ops/caddy/Caddyfile` (details in `ops/runbooks/deploy-aws.md`). Verified
+live: dashboard/admin/static assets all serve correctly over real HTTPS,
+a real file round-tripped through the real S3 bucket via the instance
+role (no static credentials anywhere), and a real nightly-backup cron
+job is installed and was test-run successfully against the live
+database. This closes the one item Day 12 originally left open.
+
 Real historical data: already loaded. This project's real brand data
 (Killer, Pepe, Junior Killer) is genuine historical sales data uploaded
 during Phase-1 development via the normal pipeline/backfill, not
@@ -764,11 +782,11 @@ task.
 - [x] All documented filters work; discount% computed consistently.
 - [x] RBAC enforced (Super Admin, Data Inserter); admin manages master data.
 - [x] Sub-second dashboards on ~30–40M synthetic rows.
-- [x] TLS, nightly backups, tested restore, docs + `v1.0.0`. **Not done:** an
-      actual public VPS deploy -- no domain/server was provisioned in this
-      engagement, so this is verified against the real prod artifacts
-      running locally, not a live production URL. See Day 12's status note
-      and `ops/runbooks/deploy.md`.
+- [x] Deployed live to AWS EC2 (real S3, IAM instance role, TLS via
+      Caddy), nightly backups running, tested restore, docs + `v1.0.0`.
+      See Day 12's status note and `ops/runbooks/deploy-aws.md`. Still on
+      a bare IP with a self-signed cert (no domain purchased yet) --
+      adding one later is a one-line `.env` change, not a re-deploy.
 
 ---
 
