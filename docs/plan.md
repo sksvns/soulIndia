@@ -698,6 +698,48 @@ reproducibility without regenerating 36M rows.
 
 ## Day 12 — Deploy, backups, docs, handover
 
+**Status:** ✅ Done (2026-07-10), scoped to artifact-preparation rather
+than a live public deploy -- no VPS/domain was provisioned in this
+engagement, so "production live" below means "verified against the exact
+prod artifacts, running locally," not a real public URL.
+
+`docker-compose.yml` split into an environment-agnostic base plus
+`docker-compose.override.yml` (auto-loaded dev conveniences: host ports,
+bind-mounted source, the Vite dev server, plain-HTTP nginx -- local dev
+is unaffected) and `docker-compose.prod.yml` (baked images, tuned
+gunicorn workers, restart policies, a static frontend build, and Caddy
+for reverse proxy + automatic Let's Encrypt TLS, with no internal
+service exposed to the host). Django gained env-driven `SECURE_*`
+settings and `SECURE_PROXY_SSL_HEADER` for operating correctly behind
+Caddy's TLS termination. Verified live end-to-end in an isolated test
+project (`DOMAIN=localhost`, so Caddy's automatic-HTTPS fell back to its
+own internal CA instead of Let's Encrypt): frontend SPA + client-side
+routing, `/health/` and Django admin proxied to gunicorn, Django admin's
+static assets (via `collectstatic` into a volume Caddy serves directly),
+and automatic HTTP→HTTPS redirects all confirmed over real HTTPS, then
+torn down without disturbing the dev stack. What remains genuinely
+unverified is the one thing that needs a real public domain: an actual
+Let's Encrypt issuance/renewal cycle.
+
+`manage.py backup_database` (pg_dump -Fc → the same object storage used
+for file uploads, retention pruning) and `manage.py create_super_admin`
+(bootstraps the first admin on a fresh database) were both verified for
+real, not just written: a genuine backup of this project's full
+~36.8M-row dataset (1073 MB) was taken, downloaded, and `pg_restore`'d
+into a scratch database in **181 seconds**, with `fact_sales`/
+`mv_category_perf`/`django_migrations` row counts confirmed identical to
+the source -- comfortably inside the ~30 minute target. Full methodology,
+the exact restore procedure for a real incident, and one known-benign
+`pg_restore` client/server version warning are documented in
+`ops/runbooks/restore.md`; the deploy checklist (VPS/DNS prerequisites,
+first-deploy steps, redeploys) is in `ops/runbooks/deploy.md`.
+
+Real historical data: already loaded. This project's real brand data
+(Killer, Pepe, Junior Killer) is genuine historical sales data uploaded
+during Phase-1 development via the normal pipeline/backfill, not
+synthetic demo data -- no separate backfill step was needed for this
+task.
+
 **Goals:** production live and operable.
 
 **Tasks**
