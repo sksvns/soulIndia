@@ -11,6 +11,7 @@ import {
   Descriptions,
 } from 'antd'
 import { UploadOutlined, DownloadOutlined, InboxOutlined } from '@ant-design/icons'
+import { isAxiosError } from 'axios'
 import { fetchUploadConfigs } from '../api/masterdata'
 import { downloadErrorReport, fetchUploadStatus, uploadFile } from '../api/ingestion'
 import { useAuth } from '../auth/AuthContext'
@@ -86,8 +87,9 @@ export function UploadPage() {
       const created = await uploadFile(file, brandCode, productLine)
       setBatch(created)
       startPolling(created.batch_id)
-    } catch {
-      setError('Upload failed to start -- check the file and try again.')
+    } catch (err) {
+      const detail = isAxiosError(err) ? err.response?.data?.detail : undefined
+      setError(detail || 'Upload failed to start -- check the file and try again.')
     } finally {
       setSubmitting(false)
     }
@@ -104,7 +106,7 @@ export function UploadPage() {
       <Alert
         type="warning"
         showIcon
-        message="You don't have permission to upload files."
+        title="You don't have permission to upload files."
       />
     )
   }
@@ -160,7 +162,7 @@ export function UploadPage() {
           Upload
         </Button>
 
-        {error && <Alert type="error" message={error} showIcon />}
+        {error && <Alert type="error" title={error} showIcon />}
 
         {batch && (
           <Card size="small" title={`Batch #${batch.batch_id}`}>

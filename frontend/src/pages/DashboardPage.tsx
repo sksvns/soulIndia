@@ -3,22 +3,17 @@ import { Row, Col, Card, Statistic, Spin, Empty, Alert, Tag } from 'antd'
 import ReactECharts from 'echarts-for-react'
 import { fetchDashboardSummary } from '../api/analytics'
 import { useFilters } from '../filters/FilterContext'
+import { formatINR, formatNumber } from '../utils/format'
 import type { DashboardSummary } from '../types'
-
-const INR = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 0,
-})
 
 function seasonChartOption(summary: DashboardSummary) {
   const seasons = summary.by_season.map((s) => s.season_code ?? 'Unknown')
   return {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', valueFormatter: (v: number) => formatINR(v) },
     legend: { data: ['MRP Sales', 'Net Sales', 'Discount'], top: 0 },
-    grid: { left: 60, right: 24, bottom: 32, top: 48 },
+    grid: { left: 90, right: 24, bottom: 32, top: 48 },
     xAxis: { type: 'category', data: seasons },
-    yAxis: { type: 'value' },
+    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => formatINR(v) } },
     series: [
       {
         name: 'MRP Sales',
@@ -70,7 +65,7 @@ export function DashboardPage() {
   }
 
   if (error) {
-    return <Alert type="error" message={error} showIcon />
+    return <Alert type="error" title={error} showIcon />
   }
 
   return (
@@ -80,7 +75,11 @@ export function DashboardPage() {
           <Row gutter={16}>
             <Col span={6}>
               <Card>
-                <Statistic title="Quantity Sold" value={summary.total.quantity} />
+                <Statistic
+                  title="Quantity Sold"
+                  value={summary.total.quantity}
+                  formatter={(v) => formatNumber(Number(v))}
+                />
               </Card>
             </Col>
             <Col span={6}>
@@ -88,7 +87,7 @@ export function DashboardPage() {
                 <Statistic
                   title="MRP Sales"
                   value={summary.total.mrp_value}
-                  formatter={(v) => INR.format(Number(v))}
+                  formatter={(v) => formatINR(Number(v))}
                 />
               </Card>
             </Col>
@@ -97,7 +96,7 @@ export function DashboardPage() {
                 <Statistic
                   title="Net Sales"
                   value={summary.total.net_value}
-                  formatter={(v) => INR.format(Number(v))}
+                  formatter={(v) => formatINR(Number(v))}
                 />
               </Card>
             </Col>
@@ -106,7 +105,7 @@ export function DashboardPage() {
                 <Statistic
                   title="Total Discount"
                   value={summary.total.discount_value}
-                  formatter={(v) => INR.format(Number(v))}
+                  formatter={(v) => formatINR(Number(v))}
                 />
               </Card>
             </Col>

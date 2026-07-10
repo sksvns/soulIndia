@@ -3,6 +3,7 @@ import { Table, Select, Card, Empty, Alert, Space, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchCategoryPerf } from '../api/analytics'
 import { useFilters } from '../filters/FilterContext'
+import { formatINR, formatNumber } from '../utils/format'
 import type { CategoryPerfRow, OrderBy } from '../types'
 
 const ORDER_BY_OPTIONS: { label: string; value: OrderBy }[] = [
@@ -11,12 +12,6 @@ const ORDER_BY_OPTIONS: { label: string; value: OrderBy }[] = [
   { label: 'Quantity', value: 'quantity' },
   { label: 'Discount %', value: 'discount_pct' },
 ]
-
-const INR = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 0,
-})
 
 const columns: ColumnsType<CategoryPerfRow> = [
   {
@@ -36,20 +31,21 @@ const columns: ColumnsType<CategoryPerfRow> = [
     dataIndex: 'mrp_value',
     align: 'right',
     sorter: (a, b) => a.mrp_value - b.mrp_value,
-    render: (v: number) => INR.format(v),
+    render: (v: number) => formatINR(v),
   },
   {
     title: 'Net Sales',
     dataIndex: 'net_value',
     align: 'right',
     sorter: (a, b) => a.net_value - b.net_value,
-    render: (v: number) => INR.format(v),
+    render: (v: number) => formatINR(v),
   },
   {
     title: 'Quantity',
     dataIndex: 'quantity',
     align: 'right',
     sorter: (a, b) => a.quantity - b.quantity,
+    render: (v: number) => formatNumber(v),
   },
   {
     title: 'Discount %',
@@ -92,7 +88,7 @@ export function CategoriesPage() {
   }
 
   if (error) {
-    return <Alert type="error" message={error} showIcon />
+    return <Alert type="error" title={error} showIcon />
   }
 
   return (

@@ -43,11 +43,24 @@ interface RetriableConfig extends InternalAxiosRequestConfig {
   _retried?: boolean
 }
 
+// Login/refresh's own 401s (bad credentials, expired refresh token) are
+// not "this session went stale mid-request" -- they must surface as a
+// normal rejected promise, not trigger a refresh-and-retry (which would
+// itself fail with no refresh token yet and force a redirect that wipes
+// the error the user is supposed to see).
+const AUTH_ENDPOINTS = ['/auth/login/', '/auth/refresh/']
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const config = error.config as RetriableConfig | undefined
-    if (error.response?.status !== 401 || !config || config._retried) {
+    const url: string = config?.url ?? ''
+    if (
+      error.response?.status !== 401 ||
+      !config ||
+      config._retried ||
+      AUTH_ENDPOINTS.some((endpoint) => url.includes(endpoint))
+    ) {
       throw error
     }
     config._retried = true
