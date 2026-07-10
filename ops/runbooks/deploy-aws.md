@@ -10,6 +10,22 @@ names, so against a bare IP it falls back to its own internal
 security warning until a real domain is pointed at it later (at which
 point this is a one-line `.env` change, not a re-deploy).
 
+**Deployed and verified live on 2026-07-10** (real EC2 instance, real S3
+bucket, real IAM instance role -- not just tested locally). One real bug
+surfaced only at this stage, now fixed in `ops/caddy/Caddyfile`
+(`default_sni {$DOMAIN}` in the global options block): connecting
+straight to an IP address sends no SNI at all (SNI only applies to
+hostnames, RFC 6066), and Caddy's fallback -- matching the connection's
+*local socket address* instead -- doesn't work behind AWS's Elastic IP
+NAT, since the instance's own OS only ever sees its private IP, never
+the public one the certificate was actually issued for. The connection
+would fail outright (TLS handshake error, not just a browser trust
+warning) without this fix. `default_sni` was the correct, minimal fix;
+`network_mode: host` was tried first and did *not* fix it, since AWS's
+NAT happens outside the instance's network namespace entirely -- not
+worth attempting again. This only matters for the bare-IP case; once a
+real domain is set, SNI is always present and this setting is unused.
+
 Every command below uses the AWS CLI (`aws sso login` first, or
 whichever auth method you use). Console steps are equivalent if you
 prefer clicking through the UI instead.
