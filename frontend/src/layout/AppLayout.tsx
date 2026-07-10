@@ -53,7 +53,7 @@ export function AppLayout() {
               overflow: 'hidden',
             }}
           >
-            {collapsed ? 'RA' : 'Retail Analytics'}
+            {collapsed ? 'SI' : 'Soul India'}
           </div>
           <Menu
             theme="dark"
