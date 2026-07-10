@@ -47,3 +47,44 @@ def test_unauthenticated_cannot_list_brands():
     response = client.get("/api/masterdata/brands/")
 
     assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_upload_config_list_returns_brand_product_line_pairs(data_inserter_user):
+    call_command("seed_brands", stdout=StringIO())
+    call_command("seed_upload_configs", stdout=StringIO())
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/masterdata/upload-configs/")
+
+    assert response.status_code == 200
+    pairs = {(c["brand_code"], c["product_line"]) for c in response.data["upload_configs"]}
+    assert pairs == {
+        ("KILLER", "menswear"),
+        ("PEPE", "menswear"),
+        ("JUNIOR_KILLER", "kids"),
+    }
+
+
+@pytest.mark.django_db
+def test_upload_config_list_excludes_inactive_configs(data_inserter_user):
+    from apps.masterdata.models import BrandUploadConfig
+
+    call_command("seed_brands", stdout=StringIO())
+    call_command("seed_upload_configs", stdout=StringIO())
+    BrandUploadConfig.objects.filter(brand__brand_code="PEPE").update(active=False)
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/masterdata/upload-configs/")
+
+    pairs = {(c["brand_code"], c["product_line"]) for c in response.data["upload_configs"]}
+    assert ("PEPE", "menswear") not in pairs
+
+
+@pytest.mark.django_db
+def test_unauthenticated_cannot_list_upload_configs():
+    client = APIClient()
+
+    response = client.get("/api/masterdata/upload-configs/")
+
+    assert response.status_code == 401
