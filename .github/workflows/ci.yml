@@ -86,6 +86,8 @@ jobs:
           docker run --rm --network host \
             -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
             minio/mc mb --ignore-existing local/retail-analytics-uploads
+      - name: Ensure pg_dump/pg_restore are available (for backup_database tests)
+        run: which pg_dump || (sudo apt-get update && sudo apt-get install -y postgresql-client)
       - run: python manage.py migrate --noinput
       - run: pytest -q
 
