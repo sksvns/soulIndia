@@ -21,6 +21,23 @@ DEBUG = env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = [
     h for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h
 ]
+CSRF_TRUSTED_ORIGINS = [
+    o for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o
+]
+
+# Caddy terminates TLS and forwards plain HTTP to gunicorn, setting
+# X-Forwarded-Proto so Django can still tell the original request was
+# HTTPS (request.is_secure(), secure cookies, CSRF's same-origin check all
+# depend on this). All off by default -- dev has no TLS in front of it, so
+# forcing these on there would make every request look "insecure" and
+# break the CSRF/session cookies outright.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", False)
+SESSION_COOKIE_SECURE = env_bool("DJANGO_SECURE_SSL_REDIRECT", False)
+CSRF_COOKIE_SECURE = env_bool("DJANGO_SECURE_SSL_REDIRECT", False)
+SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_SECURE_HSTS_SECONDS", "0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
+SECURE_HSTS_PRELOAD = SECURE_HSTS_SECONDS > 0
 
 INSTALLED_APPS = [
     "django.contrib.admin",

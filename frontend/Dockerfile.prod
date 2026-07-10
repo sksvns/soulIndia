@@ -1,0 +1,15 @@
+FROM node:22-alpine AS build
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# The build stage's only job is to produce /app/dist; the final image just
+# copies it into a shared named volume for Caddy to serve directly (same
+# one-shot-then-exit pattern already used by docker-compose.yml's
+# minio-init service) -- no Node process runs in production.
+FROM alpine:3.20
+COPY --from=build /app/dist /dist
+CMD ["sh", "-c", "rm -rf /output/* && cp -r /dist/. /output/"]
