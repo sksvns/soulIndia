@@ -758,13 +758,17 @@ task.
 
 ## Phase 1 — verification & exit criteria
 
-- [ ] Any brand's file uploads via its mapping config; bad files produce actionable error reports.
-- [ ] Re-upload replaces (brand, store, month) with zero duplication; returns net correctly.
-- [ ] Dashboard, Store-wise, Category-wise, Trends all correct vs hand-computed fixtures.
-- [ ] All documented filters work; discount% computed consistently.
-- [ ] RBAC enforced (Super Admin, Data Inserter); admin manages master data.
-- [ ] Sub-second dashboards on ~30–40M synthetic rows.
-- [ ] Deployed, TLS, nightly backups, tested restore, docs + `v1.0.0`.
+- [x] Any brand's file uploads via its mapping config; bad files produce actionable error reports.
+- [x] Re-upload replaces (brand, store, month) with zero duplication; returns net correctly.
+- [x] Dashboard, Store-wise, Category-wise, Trends all correct vs hand-computed fixtures.
+- [x] All documented filters work; discount% computed consistently.
+- [x] RBAC enforced (Super Admin, Data Inserter); admin manages master data.
+- [x] Sub-second dashboards on ~30–40M synthetic rows.
+- [x] TLS, nightly backups, tested restore, docs + `v1.0.0`. **Not done:** an
+      actual public VPS deploy -- no domain/server was provisioned in this
+      engagement, so this is verified against the real prod artifacts
+      running locally, not a live production URL. See Day 12's status note
+      and `ops/runbooks/deploy.md`.
 
 ---
 
