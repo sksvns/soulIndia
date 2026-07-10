@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.ingestion import storage
 from apps.ingestion.models import FactSales, UploadBatch
-from apps.ingestion.tasks import process_backfill_batch, process_upload_batch
+from apps.ingestion.tasks import process_upload_batch
 from apps.masterdata.models import BrandUploadConfig, DimBrand
 from tests.ingestion_fixtures import KILLER_BAD_ROWS, KILLER_GOOD_ROWS, killer_workbook
 
@@ -56,7 +56,7 @@ def test_backfill_endpoint_rejects_data_inserter(killer_brand_and_config, data_i
 
 
 @pytest.mark.django_db
-@patch("apps.ingestion.views.process_backfill_batch.delay")
+@patch("apps.ingestion.views.process_upload_batch.delay")
 def test_backfill_endpoint_accepts_super_admin_and_enqueues_task(
     mock_delay, killer_brand_and_config, super_admin_user
 ):
@@ -95,7 +95,7 @@ def test_backfill_endpoint_end_to_end_loads_good_rows_and_reports_bad_ones(
 
     # Normally run by the celery worker; called directly here (same pattern
     # as test_ingestion_tasks.py) to exercise the real task synchronously.
-    process_backfill_batch(batch_id)
+    process_upload_batch(batch_id)
 
     batch = UploadBatch.objects.get(pk=batch_id)
     assert batch.status == UploadBatch.Status.LOADED
@@ -149,8 +149,9 @@ def test_error_report_download_works_for_a_regular_failed_upload_too(
     killer_brand_and_config, data_inserter_user
 ):
     """The download endpoint isn't backfill-specific -- it fixes the same
-    gap for the regular all-or-nothing upload path, which already stored
-    error_report_key but had no way to fetch it."""
+    gap for the regular upload path, which already stored error_report_key
+    but had no way to fetch it. (This particular file is all-bad, so it
+    still fails outright with zero rows loaded either way.)"""
     brand, config = killer_brand_and_config
     object_key = storage.build_upload_key(brand.brand_code, config.product_line, "bad.xlsx")
     storage.put(

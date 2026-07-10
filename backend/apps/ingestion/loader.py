@@ -167,9 +167,10 @@ def _staging_row(row: dict, brand_id: int, batch_id: int, date_ids: dict, season
 
 
 def load_batch(batch, rows: list[dict]) -> list[dict]:
-    """Loads validated+resolved rows (apps.ingestion.pipeline.run_pipeline's
-    output) into fact_sales. Returns the slice summaries later stored on
-    upload_batch.slices.
+    """Loads validated+resolved rows (the same shape produced by
+    apps.ingestion.pipeline.run_pipeline and apps.ingestion.backfill.
+    run_backfill_pipeline's valid_rows) into fact_sales. Returns the slice
+    summaries later stored on upload_batch.slices.
 
     If any target slice already has fact_sales rows, this is an alteration
     of existing data (ADR-0003) and requires the uploader to hold

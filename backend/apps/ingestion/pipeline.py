@@ -1,9 +1,13 @@
 """Orchestrates parse -> map -> validate -> (Day 6: load) for one upload
-batch. Phase A (pure validation, no DB writes) must fully pass for the
-*entire* file before Phase B (dimension resolution, which writes to
-dim_store/dim_product) runs at all -- "on errors: nothing loaded" (plan.md
-Day 5) means nothing, including no orphan dimension rows from a batch that
-ultimately fails elsewhere in the file.
+batch. run_pipeline's all-or-nothing gate (Phase A must fully pass for the
+*entire* file before Phase B runs at all, per plan.md Day 5) is no longer
+what the upload API actually uses in production -- see
+apps.ingestion.tasks.process_upload_batch and apps.ingestion.backfill for
+the load-good-report-bad behavior every upload gets today. run_pipeline
+itself stays here, correct and tested, since it's still a reasonable
+building block (e.g. the pipeline-level test suite exercises Phase A/B
+mechanics through it directly) -- it just isn't wired to an HTTP endpoint
+by itself anymore.
 
 Row-level work is chunked at 100k rows per plan.md Day 5, even though the
 whole file is necessarily read into memory in one shot first -- pandas has
@@ -36,10 +40,9 @@ class ParsedRows:
 def parse_map_validate(brand, config, fileobj, filename: str) -> ParsedRows:
     """Phase A only: parse -> map -> coerce -> validate, with no DB writes
     and no all-or-nothing gate. Shared by run_pipeline (which gates Phase B
-    on zero errors, per Day 5) and apps.ingestion.backfill (which instead
-    loads whatever subset of rows has zero errors -- a deliberately
-    different, explicitly opt-in policy for one-time historical backfill,
-    not a relaxation of the regular upload path's guarantee).
+    on zero errors) and apps.ingestion.backfill (which instead loads
+    whatever subset of rows has zero errors -- the latter is what every
+    upload actually uses today, see this module's docstring).
     """
     sheet_name = config.validation_rules.get("sheet_name")
     headers, raw_rows = parsing.read_source_file(fileobj, filename, sheet_name=sheet_name)
