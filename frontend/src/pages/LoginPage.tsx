@@ -51,7 +51,7 @@ export function LoginPage() {
     >
       <Card style={{ width: 360 }}>
         <Typography.Title level={3} style={{ textAlign: 'center', marginBottom: 24 }}>
-          Retail Analytics
+          Soul India
         </Typography.Title>
         {error && <Alert type="error" title={error} showIcon style={{ marginBottom: 16 }} />}
         <Form<LoginForm> layout="vertical" onFinish={onFinish} disabled={submitting}>

@@ -49,18 +49,32 @@ in this engagement yet. This is the checklist for when one is.
    docker compose exec backend python manage.py create_super_admin \
      --email=you@yourcompany.com --password='<a real generated password>'
    ```
-6. Historical brand data: already loaded (this project's real brand data
-   -- Killer, Pepe, Junior Killer -- is genuine historical sales data
-   uploaded via the normal upload pipeline / backfill command during
-   Phase-1 development, not synthetic demo data). No separate backfill
-   step is needed for a fresh prod deployment of *this* database; if
-   restoring from a backup instead of migrating this exact database
-   forward, see `ops/runbooks/restore.md`. Onboarding a genuinely new
-   brand later uses the existing `backfill_historical` management
-   command (ADR-0005), same as it does today.
-7. Set up the nightly backup cron job on the host (see
+6. **A fresh database has zero master data** -- migrations create the
+   schema, not the brand/upload-config/calendar rows the Upload page
+   depends on (its Brand and Product Line selects populate from
+   `/api/masterdata/upload-configs/`; both stay empty and the Upload
+   button stays disabled until this runs). Learned the hard way on the
+   first real deploy: seed it before anyone tries to upload a file.
+   ```bash
+   docker compose exec backend python manage.py seed_calendar
+   docker compose exec backend python manage.py seed_brands
+   docker compose exec backend python manage.py seed_upload_configs
+   docker compose exec backend python manage.py seed_attribute_registry
+   ```
+   All four are idempotent -- safe to re-run. `fact_sales` partitions for
+   whatever financial year a file covers are created automatically by
+   the upload pipeline itself (`ensure_partition_for_date` in
+   `apps/ingestion/loader.py`), not a separate manual step.
+7. Historical brand data: **only "already loaded" if you restored an
+   existing backup** (`ops/runbooks/restore.md`) rather than migrating a
+   fresh database forward -- a fresh database has no fact rows either,
+   same as it has no master data. Upload real historical files through
+   the normal Upload page, or use the Super-Admin-only
+   `backfill_historical` management command (ADR-0005), same as it does
+   today.
+8. Set up the nightly backup cron job on the host (see
    `ops/runbooks/restore.md`'s "Scheduling" section).
-8. Confirm the app is reachable end-to-end: log in at `https://<your
+9. Confirm the app is reachable end-to-end: log in at `https://<your
    domain>/`, view a dashboard with real data, and confirm
    `https://<your domain>/health/` reports every dependency `ok`.
 
