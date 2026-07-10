@@ -581,6 +581,49 @@ the first screenshot.
 
 ## Day 10 — Store-wise & Category-wise views + Upload UI
 
+**Status:** ✅ Done (2026-07-10). `StoresPage`/`CategoriesPage` are both
+top-10 tables wired to Day 8's `/api/analytics/stores/` and `/categories/`,
+reusing the existing global filter bar (brand/FY/month/etc. -- no new
+filter mechanism needed) plus a page-local "Order by" select that drives
+the server-side top-10 query; AntD Table's own column sorters are also
+enabled for re-sorting the fetched 10 rows client-side for convenience.
+The category-wise view's specific "store multi-select" requirement was
+implemented by upgrading the *global* filter bar's store field to a
+tags-mode Select (comma-joined into the same `Filters.store` string the
+backend already accepts for multi-value filters) rather than adding a
+page-local duplicate -- one consistent control every page benefits from,
+and `CategoriesPage` surfaces the active selection directly so it's not a
+silent global setting.
+
+`UploadPage`: brand + product-line selects (new `GET
+/api/masterdata/upload-configs/`, since a brand with more than one
+product line needs the user to pick which mapping config applies, and
+that list must come from the database, never be hardcoded), a file
+Dragger, and a submit button posting to the regular all-or-nothing
+`/api/ingestion/uploads/` -- deliberately *not* the Super-Admin-only
+backfill path from ADR-0005, which stays a separate, elevated-privilege
+capability rather than a routine upload UI feature. Polls batch status
+every 2s until a terminal state; on failure with an `error_report_key`,
+downloads the CSV as an authenticated blob (a plain `<a href>` can't
+attach the JWT bearer header) and triggers a real browser download.
+
+**Verified end-to-end in a real headless browser** against all three real
+loaded brands, not just build/lint: store-wise and category-wise tables
+render real data, Order By and column sorters both work, the global store
+multi-select correctly scopes category results (and correctly returns
+empty when scoped to a store outside the currently-selected brand,
+proving the filter genuinely applies rather than being silently ignored),
+and a real upload of a deliberately bad file reaches "failed" status via
+polling and downloads a CSV matching the exact rejected row/reason.
+Hit and fixed two real frontend bugs this surfaced: the file Dragger's
+`beforeUpload` return value alone doesn't reliably capture the selected
+`File` object in this AntD version -- switched to the `onChange`
+`fileList`-based pattern; and this AntD version keeps every Select's
+dropdown mounted in the DOM (tagging inactive ones
+`ant-select-dropdown-hidden` rather than removing them) rather than
+unmounting on close, which the verification script's option-lookups had
+to scope around explicitly.
+
 **Goals:** the remaining analytical screens and the upload experience.
 
 **Tasks**

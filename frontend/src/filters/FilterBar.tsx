@@ -62,12 +62,14 @@ export function FilterBar() {
         onChange={(e) => setFilter('season', e.target.value || undefined)}
         allowClear
       />
-      <Input
-        style={{ width: 130 }}
-        placeholder="Store code"
-        value={filters.store ?? ''}
-        onChange={(e) => setFilter('store', e.target.value || undefined)}
-        allowClear
+      <Select
+        mode="tags"
+        style={{ width: 200 }}
+        placeholder="Store code(s)"
+        tokenSeparators={[',']}
+        value={filters.store ? filters.store.split(',') : []}
+        onChange={(vals) => setFilter('store', vals.length ? vals.join(',') : undefined)}
+        options={[]}
       />
       <Input
         style={{ width: 120 }}

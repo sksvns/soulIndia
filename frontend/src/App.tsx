@@ -5,6 +5,9 @@ import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppLayout } from './layout/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { StoresPage } from './pages/StoresPage'
+import { CategoriesPage } from './pages/CategoriesPage'
+import { UploadPage } from './pages/UploadPage'
 import { ComingSoonPage } from './pages/ComingSoonPage'
 
 function App() {
@@ -17,13 +20,10 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>
                 <Route index element={<DashboardPage />} />
-                <Route path="stores" element={<ComingSoonPage title="Store-wise view" />} />
-                <Route
-                  path="categories"
-                  element={<ComingSoonPage title="Category-wise view" />}
-                />
+                <Route path="stores" element={<StoresPage />} />
+                <Route path="categories" element={<CategoriesPage />} />
                 <Route path="trends" element={<ComingSoonPage title="Trends view" />} />
-                <Route path="upload" element={<ComingSoonPage title="Upload" />} />
+                <Route path="upload" element={<UploadPage />} />
               </Route>
             </Route>
           </Routes>
