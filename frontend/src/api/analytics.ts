@@ -18,8 +18,11 @@ export async function fetchFilterOptions(): Promise<FilterAttribute[]> {
   return data.filters
 }
 
+// brandCode is optional on both dashboard endpoints -- omitted means
+// every active brand combined (client feedback: that's the dashboard's
+// default view, not a precondition).
 export async function fetchDashboardFilterOptions(
-  brandCode: string,
+  brandCode: string | undefined,
 ): Promise<DashboardFilterOptions> {
   const { data } = await apiClient.get<DashboardFilterOptions>(
     '/analytics/dashboard/filter-options/',
@@ -29,7 +32,7 @@ export async function fetchDashboardFilterOptions(
 }
 
 export async function fetchDashboardSummary(
-  brandCode: string,
+  brandCode: string | undefined,
   filters: Filters,
   refresh = false,
 ): Promise<DashboardSummary> {
