@@ -128,7 +128,7 @@ export function DashboardFilterBar({
         loading={optionsLoading}
         value={filters.store}
         onChange={(v) => onFilterChange('store', v)}
-        options={options.stores.map((s) => ({ label: s.store_name, value: s.store_code }))}
+        options={options.stores.map((name) => ({ label: name, value: name }))}
       />
       {activeCount > 0 && (
         <Button icon={<ClearOutlined />} onClick={onClear}>

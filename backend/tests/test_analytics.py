@@ -227,7 +227,10 @@ def test_dashboard_summary_filters_by_category_sub_category_and_store(loaded_tre
     jeans_only = queries.dashboard_summary([brand.brand_id], {"category": "JEANS"})
     assert jeans_only["total"]["net_value"] == Decimal("1500.00")  # row 503
 
-    one_store = queries.dashboard_summary([brand.brand_id], {"store": "ESIS999"})
+    # Dashboard's store filter matches by store_name, not store_code (client
+    # feedback: the same physical store gets a different code per brand, so
+    # name is the identity that should combine across brands).
+    one_store = queries.dashboard_summary([brand.brand_id], {"store": "SILVER SQUARE - PATNA"})
     assert one_store["total"]["net_value"] == Decimal("500.00")  # row 505 only
 
 
@@ -239,7 +242,7 @@ def test_dashboard_filter_options_reflects_real_data_only(loaded_trend_data):
 
     assert options["financial_years"] == ["23-24", "24-25"]
     assert set(options["categories"]) == {"SHIRTS", "JEANS"}
-    assert {s["store_code"] for s in options["stores"]} == {"ESIS170", "ESIS999"}
+    assert set(options["stores"]) == {"AADARSH ENTERPRISES - DUMRAO", "SILVER SQUARE - PATNA"}
 
 
 @pytest.mark.django_db
@@ -278,9 +281,63 @@ def test_dashboard_filter_options_combines_every_brand_when_no_single_brand_requ
 
     assert set(combined["categories"]) >= set(killer_only["categories"])
     assert set(combined["categories"]) >= set(pepe_only["categories"])
-    combined_stores = {s["store_code"] for s in combined["stores"]}
-    assert combined_stores >= {s["store_code"] for s in killer_only["stores"]}
-    assert combined_stores >= {s["store_code"] for s in pepe_only["stores"]}
+    assert set(combined["stores"]) >= set(killer_only["stores"])
+    assert set(combined["stores"]) >= set(pepe_only["stores"])
+
+
+@pytest.fixture
+def loaded_killer_and_pepe_same_store_name(loaded_killer_data, data_inserter_user):
+    """Pepe data at a store sharing Killer's store *name* but under a
+    different store_code -- the exact cross-brand scenario the client
+    described: one store, one code per brand, but the same real-world
+    store name."""
+    from apps.ingestion.models import UploadBatch
+
+    pepe = DimBrand.objects.get(brand_code="PEPE")
+    pepe_config = BrandUploadConfig.objects.get(brand=pepe)
+    same_name_row = {
+        **PEPE_GOOD_ROWS[0],
+        "Store Name": "AADARSH ENTERPRISES - DUMRAO",
+        "STORE CODE": "PEPE-DUMRAO-01",
+        "BillNo": "PEPE-SHARED-001",
+    }
+    batch = UploadBatch.objects.create(
+        brand=pepe,
+        config=pepe_config,
+        uploaded_by=data_inserter_user,
+        file_name="pepe_shared_store.xlsx",
+        object_key="uploads/pepe/menswear/pepe_shared_store.xlsx",
+    )
+    result = run_pipeline(
+        pepe, pepe_config, pepe_workbook([same_name_row]), "pepe_shared_store.xlsx"
+    )
+    assert result.ok, result.errors
+    load_batch(batch, result.rows)
+    refresh_all()
+    return loaded_killer_data, pepe
+
+
+@pytest.mark.django_db
+def test_dashboard_combines_same_store_name_across_brands_when_all_brands_selected(
+    loaded_killer_and_pepe_same_store_name,
+):
+    """The actual client ask: on the all-brands dashboard, a store name
+    that exists under a different store_code per brand should combine
+    every brand's data for it, not just whichever brand owns that one
+    store_code."""
+    killer, pepe = loaded_killer_and_pepe_same_store_name
+
+    combined = queries.dashboard_summary(
+        [killer.brand_id, pepe.brand_id], {"store": "AADARSH ENTERPRISES - DUMRAO"}
+    )
+    # Killer's 3 rows at ESIS170/"AADARSH ENTERPRISES - DUMRAO" (EXPECTED_TOTAL_NET)
+    # plus Pepe's 1 row at its own differently-coded same-named store.
+    assert combined["total"]["net_value"] == EXPECTED_TOTAL_NET + Decimal("1799.00")
+
+    options = queries.dashboard_filter_options([killer.brand_id, pepe.brand_id])
+    assert (
+        options["stores"].count("AADARSH ENTERPRISES - DUMRAO") == 1
+    )  # deduped, not one per brand
 
 
 @pytest.mark.django_db

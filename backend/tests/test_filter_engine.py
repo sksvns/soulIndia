@@ -60,3 +60,24 @@ def test_gender_only_supported_on_category_perf_not_store_perf():
     sql_category, _ = build_where("mv_category_perf", {"gender": "MENS"})
     assert sql_store == ""
     assert sql_category == "gender = %(filter_gender)s"
+
+
+def test_dashboard_category_perf_filters_store_by_name_not_code():
+    """The Dashboard's own breakdown queries filter store by name (client
+    feedback: the same physical store has a different store_code per
+    brand), unlike every other mv_category_perf-backed page."""
+    sql, params = build_where("dashboard_category_perf", {"store": "AADARSH ENTERPRISES - DUMRAO"})
+    assert sql == "store_name = %(filter_store)s"
+    assert params == {"filter_store": "AADARSH ENTERPRISES - DUMRAO"}
+
+
+def test_fact_sales_filters_store_by_name_and_ignores_financial_year_month():
+    """financial_year/month are deliberately absent from this entry --
+    _dashboard_weekly_breakdown pins them via dim_calendar directly, not
+    through this generic filter engine."""
+    sql, params = build_where(
+        "fact_sales",
+        {"store": "AADARSH ENTERPRISES - DUMRAO", "financial_year": "23-24", "month": 4},
+    )
+    assert sql == "st.store_name = %(filter_store)s"
+    assert params == {"filter_store": "AADARSH ENTERPRISES - DUMRAO"}

@@ -118,7 +118,7 @@ def test_dashboard_filter_options_endpoint_returns_real_distinct_values(
     assert response.status_code == 200
     assert response.data["financial_years"] == ["23-24"]
     assert set(response.data["categories"]) == {"SHIRTS", "JEANS"}
-    assert response.data["stores"][0]["store_code"] == "ESIS170"
+    assert response.data["stores"] == ["AADARSH ENTERPRISES - DUMRAO"]
 
 
 @pytest.mark.django_db

@@ -383,13 +383,18 @@ KILLER_TREND_ROWS = [
     },
     {
         # Different store -- proves store_trend's store_code scoping
-        # actually filters, not just happens to match everything.
+        # actually filters, not just happens to match everything. Distinct
+        # NAME too: a different store_code within one brand always means a
+        # different real-world store (client-confirmed invariant -- see
+        # dashboard_filter_options), so its name must differ as well or
+        # store_name-based dashboard filtering couldn't tell them apart.
         **KILLER_GOOD_ROWS[0],
         "BILL NO \nINVOICE NO": 505,
         "NEW DATE": date(2023, 4, 5),
         "MONTH": "APRIL",
         "F. YEAR": "23-24",
         "STORE CODE": "ESIS999",
+        "NAME": "SILVER SQUARE - PATNA",
         "CATEGORY": "SHIRTS",
         "MAIN\nCATEGORY": "SHIRTS",
         "SEASON": "SS23",
