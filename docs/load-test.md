@@ -158,10 +158,24 @@ measurement is reproducible without regenerating 36M rows.
 
 ## Phase 2 scaling note
 
-`refresh_all()` at ~223–262 seconds for ~36.8M rows across 3 MVs is an
-async, post-upload cost today, not a user-facing one. Worth revisiting if
-Phase 2 adds enough brands/history that this starts to threaten the
-Celery worker's throughput or upload-to-ready latency — options at that
-point would include refreshing only the affected brand's MV partitions
-(if MVs are ever partitioned) or moving to incremental/materialized-view
-maintenance instead of a full concurrent refresh.
+**Correction (2026-07-12): this is user-facing, not just an async
+post-upload cost.** `refresh_all()` runs synchronously inside
+`process_upload_batch`/`execute_backfill` -- a batch doesn't reach
+`loaded` until it finishes, so its cost is directly what the uploader
+waits on. This was confirmed the hard way: with the Day 11 load-test
+brands' ~36.8M rows still sitting in this dev database (deactivated, but
+not deleted), a real user-reported "upload is slow" traced straight back
+to `refresh_all()` taking ~238 seconds, because it refreshes materialized
+views across *every* brand combined, not just the one being uploaded.
+Deleting that synthetic data (a one-time partition-drop cleanup, not a
+code change) brought it down to ~4.5s; a full realistic re-upload
+end-to-end (conflict detection, slice replace, refresh) now takes 3.4s.
+
+At real Phase-1 scale (the 3 real brands, ~800K rows total) this was
+never the bottleneck. It becomes one again as more brands/history
+accumulate, since every brand's upload pays for refreshing every other
+brand's MVs too. Worth revisiting if Phase 2 adds enough brands/history
+to bring this back — options at that point would include refreshing only
+the affected brand's MV partitions (if MVs are ever partitioned per
+brand) or moving to incremental/materialized-view maintenance instead of
+a full concurrent refresh.
