@@ -25,16 +25,30 @@ export interface Totals {
   quantity: number
 }
 
-export interface SeasonBreakdown extends Totals {
-  season_code: string | null
+export interface YearBreakdown extends Totals {
+  financial_year: string | null
 }
 
 export interface DashboardSummary {
   total: Totals
-  by_season: SeasonBreakdown[]
+  by_year: YearBreakdown[]
   brand_code: string
   cache_hit: boolean
   cached_at: string
+}
+
+export interface DashboardStoreOption {
+  store_code: string
+  store_name: string
+}
+
+// Distinct values actually present in a brand's data, for the Dashboard's
+// own simplified filter bar (brand/year/month/category/sub_category/store)
+export interface DashboardFilterOptions {
+  financial_years: string[]
+  categories: string[]
+  sub_categories: string[]
+  stores: DashboardStoreOption[]
 }
 
 // Shape shared by every analytics list endpoint (stores/categories/

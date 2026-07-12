@@ -27,33 +27,81 @@ def _dictfetchall(cursor) -> list[dict]:
 
 
 def dashboard_summary(brand_id: int, filters: dict = None) -> dict:
-    """Total/MRP/Net sales + total discount, broken down by season."""
-    where_sql, where_params = build_where("mv_sales_summary", filters)
+    """Total/MRP/Net sales + total discount, broken down by financial year
+    (client feedback: year is the chart baseline, not season). Queries
+    mv_category_perf -- the same view category_perf_top10 uses -- rather
+    than a coarser (brand x FY x month x season)-only view, since the
+    dashboard is also filterable by category/sub_category/store, which
+    only a view with that grain can answer; summing all the way up to just
+    financial_year here still yields correct brand-wide totals."""
+    where_sql, where_params = build_where("mv_category_perf", filters)
     extra_where = f"AND {where_sql}" if where_sql else ""
     sql = f"""
         SELECT
-            season_code,
+            financial_year,
             SUM(mrp_value) AS mrp_value,
             SUM(net_value) AS net_value,
             SUM(discount_value) AS discount_value,
             SUM(quantity) AS quantity
-        FROM mv_sales_summary
+        FROM mv_category_perf
         WHERE brand_id = %(brand_id)s {extra_where}
-        GROUP BY season_code
-        ORDER BY season_code NULLS LAST
+        GROUP BY financial_year
+        ORDER BY financial_year NULLS LAST
     """
     params = {"brand_id": brand_id, **where_params}
     with connection.cursor() as cursor:
         cursor.execute(sql, params)
-        by_season = _dictfetchall(cursor)
+        by_year = _dictfetchall(cursor)
 
     total = {
-        "mrp_value": sum((row["mrp_value"] or 0) for row in by_season),
-        "net_value": sum((row["net_value"] or 0) for row in by_season),
-        "discount_value": sum((row["discount_value"] or 0) for row in by_season),
-        "quantity": sum((row["quantity"] or 0) for row in by_season),
+        "mrp_value": sum((row["mrp_value"] or 0) for row in by_year),
+        "net_value": sum((row["net_value"] or 0) for row in by_year),
+        "discount_value": sum((row["discount_value"] or 0) for row in by_year),
+        "quantity": sum((row["quantity"] or 0) for row in by_year),
     }
-    return {"total": total, "by_season": by_season}
+    return {"total": total, "by_year": by_year}
+
+
+def dashboard_filter_options(brand_id: int) -> dict:
+    """Distinct values actually present in this brand's data, for
+    populating the Dashboard's filter dropdowns -- never a static list, so
+    a dropdown never offers a year/category/store with zero data behind
+    it. Same source view as dashboard_summary itself."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT DISTINCT financial_year FROM mv_category_perf "
+            "WHERE brand_id = %s ORDER BY financial_year",
+            [brand_id],
+        )
+        financial_years = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT DISTINCT category FROM mv_category_perf "
+            "WHERE brand_id = %s AND category IS NOT NULL ORDER BY category",
+            [brand_id],
+        )
+        categories = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT DISTINCT sub_category FROM mv_category_perf "
+            "WHERE brand_id = %s AND sub_category IS NOT NULL ORDER BY sub_category",
+            [brand_id],
+        )
+        sub_categories = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT DISTINCT store_code, store_name FROM mv_category_perf "
+            "WHERE brand_id = %s ORDER BY store_name",
+            [brand_id],
+        )
+        stores = [{"store_code": row[0], "store_name": row[1]} for row in cursor.fetchall()]
+
+    return {
+        "financial_years": financial_years,
+        "categories": categories,
+        "sub_categories": sub_categories,
+        "stores": stores,
+    }
 
 
 def store_perf_top10(brand_id: int, filters: dict = None, order_by: str = "net") -> list[dict]:

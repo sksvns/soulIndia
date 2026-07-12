@@ -10,7 +10,7 @@ from django.db import connection
 
 logger = logging.getLogger(__name__)
 
-MATERIALIZED_VIEWS = ["mv_sales_summary", "mv_store_perf", "mv_category_perf"]
+MATERIALIZED_VIEWS = ["mv_store_perf", "mv_category_perf"]
 
 
 def refresh_all() -> None:

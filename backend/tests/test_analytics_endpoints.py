@@ -89,6 +89,20 @@ def test_dashboard_endpoint_refresh_param_bypasses_the_cache(
 
 
 @pytest.mark.django_db
+def test_dashboard_filter_options_endpoint_returns_real_distinct_values(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/dashboard/filter-options/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    assert response.data["financial_years"] == ["23-24"]
+    assert set(response.data["categories"]) == {"SHIRTS", "JEANS"}
+    assert response.data["stores"][0]["store_code"] == "ESIS170"
+
+
+@pytest.mark.django_db
 def test_stores_endpoint_returns_top10(loaded_killer_data, super_admin_user):
     client = _authed_client(super_admin_user)
 

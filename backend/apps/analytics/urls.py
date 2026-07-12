@@ -5,6 +5,11 @@ from . import views
 urlpatterns = [
     path("filters/", views.FilterOptionsView.as_view(), name="analytics-filters"),
     path("dashboard/", views.DashboardSummaryView.as_view(), name="analytics-dashboard"),
+    path(
+        "dashboard/filter-options/",
+        views.DashboardFilterOptionsView.as_view(),
+        name="analytics-dashboard-filter-options",
+    ),
     path("stores/", views.StorePerfView.as_view(), name="analytics-stores"),
     path("categories/", views.CategoryPerfView.as_view(), name="analytics-categories"),
     path("trends/stores/", views.StoreTrendView.as_view(), name="analytics-trends-stores"),

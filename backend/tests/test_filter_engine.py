@@ -34,11 +34,11 @@ def test_build_where_list_value_becomes_any_clause():
 
 
 def test_build_where_silently_drops_filters_the_target_mv_does_not_support():
-    """mv_sales_summary has no store/category grain -- asking it to filter
-    by store is a no-op, not an error, since different MVs legitimately
-    support different filter subsets by design."""
-    sql, params = build_where("mv_sales_summary", {"store": "ESIS170", "financial_year": "23-24"})
-    assert "store" not in sql
+    """mv_store_perf has no category/sub_category grain -- asking it to
+    filter by category is a no-op, not an error, since different MVs
+    legitimately support different filter subsets by design."""
+    sql, params = build_where("mv_store_perf", {"category": "SHIRTS", "financial_year": "23-24"})
+    assert "category" not in sql
     assert sql == "financial_year = %(filter_financial_year)s"
     assert params == {"filter_financial_year": "23-24"}
 

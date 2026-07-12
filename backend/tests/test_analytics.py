@@ -10,7 +10,7 @@ from apps.analytics.materialized_views import refresh_all
 from apps.ingestion.loader import load_batch
 from apps.ingestion.pipeline import run_pipeline
 from apps.masterdata.models import BrandUploadConfig, DimBrand
-from tests.ingestion_fixtures import KILLER_GOOD_ROWS, killer_workbook
+from tests.ingestion_fixtures import KILLER_GOOD_ROWS, KILLER_TREND_ROWS, killer_workbook
 
 # KILLER_GOOD_ROWS by hand: row1 net=2124.00 mrp=2499.00 disc=375.00 (SS23,
 # 23-24, April); row2 net=2450.00 mrp=3099.00 disc=649.00 (AW22, 23-24,
@@ -67,11 +67,13 @@ def test_dashboard_summary_matches_hand_computed_totals_to_the_paisa(loaded_kill
     assert result["total"]["discount_value"] == EXPECTED_TOTAL_DISCOUNT
     assert result["total"]["quantity"] == EXPECTED_TOTAL_QTY
 
-    by_season = {row["season_code"]: row for row in result["by_season"]}
-    assert set(by_season) == {"SS23", "AW22"}
-    assert by_season["SS23"]["net_value"] == EXPECTED_SS23_NET
-    assert by_season["SS23"]["mrp_value"] == EXPECTED_SS23_MRP
-    assert by_season["AW22"]["net_value"] == Decimal("2450.00")
+    # All of KILLER_GOOD_ROWS falls in the same financial year (23-24), so
+    # the year breakdown is a single row matching the brand-wide total --
+    # multi-year grouping itself is covered by the dedicated test below.
+    by_year = {row["financial_year"]: row for row in result["by_year"]}
+    assert set(by_year) == {"23-24"}
+    assert by_year["23-24"]["net_value"] == EXPECTED_TOTAL_NET
+    assert by_year["23-24"]["mrp_value"] == EXPECTED_TOTAL_MRP
 
 
 @pytest.mark.django_db
@@ -86,6 +88,70 @@ def test_dashboard_summary_filters_by_financial_year_and_month(loaded_killer_dat
 
     no_match_month = queries.dashboard_summary(brand.brand_id, {"month": 5})
     assert no_match_month["total"]["net_value"] == 0
+
+
+@pytest.fixture
+def loaded_trend_data(killer_brand_and_config, data_inserter_user):
+    from apps.ingestion.models import UploadBatch
+
+    brand, config = killer_brand_and_config
+    batch = UploadBatch.objects.create(
+        brand=brand,
+        config=config,
+        uploaded_by=data_inserter_user,
+        file_name="trend.xlsx",
+        object_key="uploads/killer/menswear/trend.xlsx",
+    )
+    result = run_pipeline(brand, config, killer_workbook(KILLER_TREND_ROWS), "trend.xlsx")
+    assert result.ok, result.errors
+    load_batch(batch, result.rows)
+    refresh_all()
+    return brand
+
+
+@pytest.mark.django_db
+def test_dashboard_summary_groups_by_financial_year_not_season(loaded_trend_data):
+    """Client feedback: the dashboard chart's baseline is year, not season
+    (see tests/test_trends.py's KILLER_TREND_ROWS hand-computation for the
+    row-by-row numbers this is built from)."""
+    brand = loaded_trend_data
+
+    result = queries.dashboard_summary(brand.brand_id)
+
+    by_year = {row["financial_year"]: row for row in result["by_year"]}
+    assert set(by_year) == {"23-24", "24-25"}
+    assert by_year["23-24"]["net_value"] == Decimal("4800.00")
+    assert by_year["23-24"]["mrp_value"] == Decimal("5000.00")
+    assert by_year["24-25"]["net_value"] == Decimal("3000.00")
+    assert by_year["24-25"]["mrp_value"] == Decimal("3000.00")
+
+
+@pytest.mark.django_db
+def test_dashboard_summary_filters_by_category_sub_category_and_store(loaded_trend_data):
+    """The dashboard's new 6-field filter set (client feedback) includes
+    category/sub_category/store -- mv_sales_summary couldn't answer these
+    at all (no grain for them); mv_category_perf can."""
+    brand = loaded_trend_data
+
+    shirts_only = queries.dashboard_summary(brand.brand_id, {"category": "SHIRTS"})
+    assert shirts_only["total"]["net_value"] == Decimal("6300.00")  # rows 501,502,504,505
+
+    jeans_only = queries.dashboard_summary(brand.brand_id, {"category": "JEANS"})
+    assert jeans_only["total"]["net_value"] == Decimal("1500.00")  # row 503
+
+    one_store = queries.dashboard_summary(brand.brand_id, {"store": "ESIS999"})
+    assert one_store["total"]["net_value"] == Decimal("500.00")  # row 505 only
+
+
+@pytest.mark.django_db
+def test_dashboard_filter_options_reflects_real_data_only(loaded_trend_data):
+    brand = loaded_trend_data
+
+    options = queries.dashboard_filter_options(brand.brand_id)
+
+    assert options["financial_years"] == ["23-24", "24-25"]
+    assert set(options["categories"]) == {"SHIRTS", "JEANS"}
+    assert {s["store_code"] for s in options["stores"]} == {"ESIS170", "ESIS999"}
 
 
 @pytest.mark.django_db
