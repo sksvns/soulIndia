@@ -130,6 +130,61 @@ def test_stores_endpoint_returns_top10(loaded_killer_data, super_admin_user):
     assert response.status_code == 200
     assert len(response.data["results"]) == 1
     assert response.data["results"][0]["store_code"] == "ESIS170"
+    assert response.data["total_count"] == 1
+    assert response.data["page"] == 1
+    assert response.data["page_size"] == "10"
+
+
+@pytest.mark.django_db
+def test_stores_endpoint_omitting_brand_code_combines_every_active_brand(
+    loaded_killer_data, data_inserter_user
+):
+    """Client feedback: the Stores page's default view (no brand_code at
+    all) is every active brand combined too, same convention as the
+    Dashboard. With only Killer loaded here, "every brand combined" is
+    the same as Killer alone -- the multi-brand math itself is covered by
+    test_analytics.py's dedicated fixture."""
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/stores/")
+
+    assert response.status_code == 200
+    assert response.data["total_count"] == 1
+    assert response.data["brand_code"] is None
+
+
+@pytest.mark.django_db
+def test_stores_endpoint_page_size_all_returns_every_row_unpaged(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/stores/", {"brand_code": "KILLER", "page_size": "all"})
+
+    assert response.status_code == 200
+    assert response.data["page_size"] == "all"
+    assert len(response.data["results"]) == response.data["total_count"] == 1
+
+
+@pytest.mark.django_db
+def test_stores_endpoint_rejects_invalid_page_size(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/stores/", {"brand_code": "KILLER", "page_size": "37"})
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_stores_filter_options_endpoint_returns_real_distinct_values(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/stores/filter-options/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    assert response.data["financial_years"] == ["23-24"]
 
 
 @pytest.mark.django_db

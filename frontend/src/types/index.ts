@@ -62,6 +62,27 @@ export interface AnalyticsResponse<T> {
   cached_at: string
 }
 
+export type PageSize = '10' | '20' | '50' | '100' | '200' | 'all'
+
+// Stores: paged + sorted server-side over the complete result (client
+// feedback), brand_code optional like the Dashboard's -- omitted means
+// every active brand combined.
+export interface PaginatedAnalyticsResponse<T> {
+  results: T
+  total_count: number
+  page: number
+  page_size: PageSize
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
+// Distinct financial years actually present, for the Stores page's own
+// simplified filter bar's Year dropdown.
+export interface StoreFilterOptions {
+  financial_years: string[]
+}
+
 // Global filter bar state -- keys match attribute_registry canonical_name
 // and analytics query params exactly (apps/analytics/views.py
 // FILTER_PARAM_NAMES), so this object can be spread straight into a

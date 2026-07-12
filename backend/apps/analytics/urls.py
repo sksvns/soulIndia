@@ -11,6 +11,11 @@ urlpatterns = [
         name="analytics-dashboard-filter-options",
     ),
     path("stores/", views.StorePerfView.as_view(), name="analytics-stores"),
+    path(
+        "stores/filter-options/",
+        views.StoreFilterOptionsView.as_view(),
+        name="analytics-stores-filter-options",
+    ),
     path("categories/", views.CategoryPerfView.as_view(), name="analytics-categories"),
     path("trends/stores/", views.StoreTrendView.as_view(), name="analytics-trends-stores"),
     path(
