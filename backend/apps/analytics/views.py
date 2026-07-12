@@ -80,6 +80,17 @@ def _parse_filters(request) -> dict:
     return filters
 
 
+def _force_refresh(request) -> bool:
+    return request.query_params.get("refresh", "").lower() == "true"
+
+
+REFRESH_PARAM = OpenApiParameter(
+    "refresh",
+    bool,
+    description="true bypasses the cache and recomputes from the database",
+)
+
+
 class FilterOptionsView(APIView):
     """Metadata for the frontend filter bar, read live from
     attribute_registry -- a new filterable attribute shows up here as soon
@@ -105,17 +116,20 @@ class DashboardSummaryView(APIView):
 
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(parameters=FILTER_PARAMS)
+    @extend_schema(parameters=[*FILTER_PARAMS, REFRESH_PARAM])
     def get(self, request):
         brand = _resolve_brand(request)
         filters = _parse_filters(request)
-        data, cache_hit = cache.get_or_compute(
+        data, cache_hit, cached_at = cache.get_or_compute(
             brand.brand_id,
             "dashboard_summary",
             filters,
             lambda: queries.dashboard_summary(brand.brand_id, filters),
+            force_refresh=_force_refresh(request),
         )
-        return Response({**data, "brand_code": brand.brand_code, "cache_hit": cache_hit})
+        return Response(
+            {**data, "brand_code": brand.brand_code, "cache_hit": cache_hit, "cached_at": cached_at}
+        )
 
 
 class StorePerfView(APIView):
@@ -123,18 +137,26 @@ class StorePerfView(APIView):
 
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(parameters=[*FILTER_PARAMS, ORDER_BY_PARAM])
+    @extend_schema(parameters=[*FILTER_PARAMS, ORDER_BY_PARAM, REFRESH_PARAM])
     def get(self, request):
         brand = _resolve_brand(request)
         filters = _parse_filters(request)
         order_by = request.query_params.get("order_by", "net")
-        data, cache_hit = cache.get_or_compute(
+        data, cache_hit, cached_at = cache.get_or_compute(
             brand.brand_id,
             "store_perf_top10",
             {**filters, "order_by": order_by},
             lambda: queries.store_perf_top10(brand.brand_id, filters, order_by),
+            force_refresh=_force_refresh(request),
         )
-        return Response({"results": data, "brand_code": brand.brand_code, "cache_hit": cache_hit})
+        return Response(
+            {
+                "results": data,
+                "brand_code": brand.brand_code,
+                "cache_hit": cache_hit,
+                "cached_at": cached_at,
+            }
+        )
 
 
 class CategoryPerfView(APIView):
@@ -142,18 +164,26 @@ class CategoryPerfView(APIView):
 
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(parameters=[*FILTER_PARAMS, ORDER_BY_PARAM])
+    @extend_schema(parameters=[*FILTER_PARAMS, ORDER_BY_PARAM, REFRESH_PARAM])
     def get(self, request):
         brand = _resolve_brand(request)
         filters = _parse_filters(request)
         order_by = request.query_params.get("order_by", "net")
-        data, cache_hit = cache.get_or_compute(
+        data, cache_hit, cached_at = cache.get_or_compute(
             brand.brand_id,
             "category_perf_top10",
             {**filters, "order_by": order_by},
             lambda: queries.category_perf_top10(brand.brand_id, filters, order_by),
+            force_refresh=_force_refresh(request),
         )
-        return Response({"results": data, "brand_code": brand.brand_code, "cache_hit": cache_hit})
+        return Response(
+            {
+                "results": data,
+                "brand_code": brand.brand_code,
+                "cache_hit": cache_hit,
+                "cached_at": cached_at,
+            }
+        )
 
 
 def _validate_trend_params(request):
@@ -193,6 +223,7 @@ class StoreTrendView(APIView):
             DIMENSION_PARAM,
             METRIC_PARAM,
             OpenApiParameter("store", str, description="store_code; brand-wide if omitted"),
+            REFRESH_PARAM,
         ]
     )
     def get(self, request):
@@ -203,13 +234,21 @@ class StoreTrendView(APIView):
         store_code = request.query_params.get("store")
 
         cache_filters = {"dimension": dimension, "metric": metric, "store": store_code}
-        data, cache_hit = cache.get_or_compute(
+        data, cache_hit, cached_at = cache.get_or_compute(
             brand.brand_id,
             "store_trend",
             cache_filters,
             lambda: queries.store_trend(brand.brand_id, dimension, metric, store_code),
+            force_refresh=_force_refresh(request),
         )
-        return Response({"results": data, "brand_code": brand.brand_code, "cache_hit": cache_hit})
+        return Response(
+            {
+                "results": data,
+                "brand_code": brand.brand_code,
+                "cache_hit": cache_hit,
+                "cached_at": cached_at,
+            }
+        )
 
 
 class CategoryTrendView(APIView):
@@ -228,6 +267,7 @@ class CategoryTrendView(APIView):
             OpenApiParameter(
                 "store", str, description="store_code(s), comma-separated; brand-wide if omitted"
             ),
+            REFRESH_PARAM,
         ]
     )
     def get(self, request):
@@ -247,12 +287,20 @@ class CategoryTrendView(APIView):
             "sub_category": sub_category,
             "store_codes": store_codes,
         }
-        data, cache_hit = cache.get_or_compute(
+        data, cache_hit, cached_at = cache.get_or_compute(
             brand.brand_id,
             "category_trend",
             cache_filters,
             lambda: queries.category_trend(
                 brand.brand_id, dimension, metric, category, sub_category, store_codes
             ),
+            force_refresh=_force_refresh(request),
         )
-        return Response({"results": data, "brand_code": brand.brand_code, "cache_hit": cache_hit})
+        return Response(
+            {
+                "results": data,
+                "brand_code": brand.brand_code,
+                "cache_hit": cache_hit,
+                "cached_at": cached_at,
+            }
+        )

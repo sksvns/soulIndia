@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type {
+  AnalyticsResponse,
   CategoryPerfRow,
   DashboardSummary,
   FilterAttribute,
@@ -19,9 +20,10 @@ export async function fetchFilterOptions(): Promise<FilterAttribute[]> {
 export async function fetchDashboardSummary(
   brandCode: string,
   filters: Filters,
+  refresh = false,
 ): Promise<DashboardSummary> {
   const { data } = await apiClient.get<DashboardSummary>('/analytics/dashboard/', {
-    params: { brand_code: brandCode, ...filters },
+    params: { brand_code: brandCode, ...filters, refresh: refresh || undefined },
   })
   return data
 }
@@ -30,22 +32,32 @@ export async function fetchStorePerf(
   brandCode: string,
   filters: Filters,
   orderBy: OrderBy,
-): Promise<StorePerfRow[]> {
-  const { data } = await apiClient.get<{ results: StorePerfRow[] }>('/analytics/stores/', {
-    params: { brand_code: brandCode, order_by: orderBy, ...filters },
+  refresh = false,
+): Promise<AnalyticsResponse<StorePerfRow[]>> {
+  const { data } = await apiClient.get<AnalyticsResponse<StorePerfRow[]>>('/analytics/stores/', {
+    params: { brand_code: brandCode, order_by: orderBy, ...filters, refresh: refresh || undefined },
   })
-  return data.results
+  return data
 }
 
 export async function fetchCategoryPerf(
   brandCode: string,
   filters: Filters,
   orderBy: OrderBy,
-): Promise<CategoryPerfRow[]> {
-  const { data } = await apiClient.get<{ results: CategoryPerfRow[] }>('/analytics/categories/', {
-    params: { brand_code: brandCode, order_by: orderBy, ...filters },
-  })
-  return data.results
+  refresh = false,
+): Promise<AnalyticsResponse<CategoryPerfRow[]>> {
+  const { data } = await apiClient.get<AnalyticsResponse<CategoryPerfRow[]>>(
+    '/analytics/categories/',
+    {
+      params: {
+        brand_code: brandCode,
+        order_by: orderBy,
+        ...filters,
+        refresh: refresh || undefined,
+      },
+    },
+  )
+  return data
 }
 
 export async function fetchStoreTrend(
@@ -53,11 +65,21 @@ export async function fetchStoreTrend(
   dimension: TrendDimension,
   metric: TrendMetric,
   store?: string,
-): Promise<TrendPoint[]> {
-  const { data } = await apiClient.get<{ results: TrendPoint[] }>('/analytics/trends/stores/', {
-    params: { brand_code: brandCode, dimension, metric, store: store || undefined },
-  })
-  return data.results
+  refresh = false,
+): Promise<AnalyticsResponse<TrendPoint[]>> {
+  const { data } = await apiClient.get<AnalyticsResponse<TrendPoint[]>>(
+    '/analytics/trends/stores/',
+    {
+      params: {
+        brand_code: brandCode,
+        dimension,
+        metric,
+        store: store || undefined,
+        refresh: refresh || undefined,
+      },
+    },
+  )
+  return data
 }
 
 export async function fetchCategoryTrend(
@@ -67,8 +89,9 @@ export async function fetchCategoryTrend(
   category?: string,
   subCategory?: string,
   store?: string,
-): Promise<TrendPoint[]> {
-  const { data } = await apiClient.get<{ results: TrendPoint[] }>(
+  refresh = false,
+): Promise<AnalyticsResponse<TrendPoint[]>> {
+  const { data } = await apiClient.get<AnalyticsResponse<TrendPoint[]>>(
     '/analytics/trends/categories/',
     {
       params: {
@@ -78,8 +101,9 @@ export async function fetchCategoryTrend(
         category: category || undefined,
         sub_category: subCategory || undefined,
         store: store || undefined,
+        refresh: refresh || undefined,
       },
     },
   )
-  return data.results
+  return data
 }

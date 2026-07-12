@@ -124,13 +124,18 @@ def test_cache_get_or_compute_is_a_miss_then_a_hit(loaded_killer_data):
         calls.append(1)
         return {"value": 42}
 
-    result1, hit1 = analytics_cache.get_or_compute(brand.brand_id, "test_endpoint", {}, compute)
-    result2, hit2 = analytics_cache.get_or_compute(brand.brand_id, "test_endpoint", {}, compute)
+    result1, hit1, cached_at1 = analytics_cache.get_or_compute(
+        brand.brand_id, "test_endpoint", {}, compute
+    )
+    result2, hit2, cached_at2 = analytics_cache.get_or_compute(
+        brand.brand_id, "test_endpoint", {}, compute
+    )
 
     assert hit1 is False
     assert hit2 is True
     assert result1 == result2 == {"value": 42}
     assert len(calls) == 1  # compute_fn only ran once
+    assert cached_at1 == cached_at2  # the hit reads back the miss's timestamp unchanged
 
 
 @pytest.mark.django_db
@@ -142,13 +147,39 @@ def test_cache_bust_invalidates_previously_cached_results(loaded_killer_data):
         calls.append(1)
         return {"value": len(calls)}
 
-    result1, _ = analytics_cache.get_or_compute(brand.brand_id, "test_endpoint", {}, compute)
+    result1, _, _ = analytics_cache.get_or_compute(brand.brand_id, "test_endpoint", {}, compute)
     analytics_cache.bust(brand.brand_id)
-    result2, hit2 = analytics_cache.get_or_compute(brand.brand_id, "test_endpoint", {}, compute)
+    result2, hit2, _ = analytics_cache.get_or_compute(brand.brand_id, "test_endpoint", {}, compute)
 
     assert hit2 is False  # bust made the old cache entry unreachable
     assert result1 != result2
     assert len(calls) == 2
+
+
+@pytest.mark.django_db
+def test_cache_force_refresh_bypasses_a_hit_and_updates_cached_at(loaded_killer_data):
+    """The manual refresh button: force_refresh=True always recomputes,
+    even though a valid cache entry exists, and the new cached_at reflects
+    that fresh computation."""
+    brand = loaded_killer_data
+    calls = []
+
+    def compute():
+        calls.append(1)
+        return {"value": len(calls)}
+
+    result1, hit1, cached_at1 = analytics_cache.get_or_compute(
+        brand.brand_id, "test_endpoint", {}, compute
+    )
+    result2, hit2, cached_at2 = analytics_cache.get_or_compute(
+        brand.brand_id, "test_endpoint", {}, compute, force_refresh=True
+    )
+
+    assert hit1 is False
+    assert hit2 is False  # force_refresh always looks like a miss
+    assert result1 != result2
+    assert len(calls) == 2
+    assert cached_at2 >= cached_at1
 
 
 @pytest.mark.django_db
@@ -165,7 +196,7 @@ def test_cache_is_scoped_per_brand(loaded_killer_data):
 
     analytics_cache.get_or_compute(loaded_killer_data.brand_id, "test_endpoint", {}, compute)
     analytics_cache.bust(pepe.brand_id)
-    _, hit = analytics_cache.get_or_compute(
+    _, hit, _ = analytics_cache.get_or_compute(
         loaded_killer_data.brand_id, "test_endpoint", {}, compute
     )
 

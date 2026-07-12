@@ -67,6 +67,25 @@ def test_dashboard_endpoint_second_call_is_a_cache_hit(loaded_killer_data, data_
     assert first.data["cache_hit"] is False
     assert second.data["cache_hit"] is True
     assert first.data["total"] == second.data["total"]
+    assert first.data["cached_at"] == second.data["cached_at"]
+
+
+@pytest.mark.django_db
+def test_dashboard_endpoint_refresh_param_bypasses_the_cache(
+    loaded_killer_data, data_inserter_user
+):
+    """The frontend's manual refresh button: ?refresh=true always looks
+    like a miss and gets a fresh cached_at, even with a valid cache entry
+    already in place from a prior call."""
+    client = _authed_client(data_inserter_user)
+
+    first = client.get("/api/analytics/dashboard/", {"brand_code": "KILLER"})
+    refreshed = client.get("/api/analytics/dashboard/", {"brand_code": "KILLER", "refresh": "true"})
+
+    assert first.data["cache_hit"] is False
+    assert refreshed.data["cache_hit"] is False
+    assert refreshed.data["cached_at"] >= first.data["cached_at"]
+    assert refreshed.data["total"] == first.data["total"]
 
 
 @pytest.mark.django_db
