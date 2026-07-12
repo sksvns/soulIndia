@@ -3,14 +3,14 @@ new filterable attribute becomes a registry row + an entry here, never a
 rewrite of the query functions in queries.py.
 
 MV_COLUMNS declares which canonical attributes each materialized view can
-actually filter on -- not every attribute applies to every MV by design
-(mv_sales_summary has no store/category grain at all). A filter for an
-attribute the target MV doesn't support is silently dropped rather than
-erroring, since asking "top categories" to also filter by store is a
-perfectly normal, supported combination, while asking mv_sales_summary
-(brand x FY x month x season only) to filter by store is simply outside
-what that view can answer -- the caller already chose which MV/endpoint to
-query, so this isn't a request to reject, it's a no-op for that one filter.
+actually filter on -- not every attribute applies to every MV by design.
+A filter for an attribute the target MV doesn't support is silently
+dropped rather than erroring, since asking "top categories" to also
+filter by store is a perfectly normal, supported combination, while
+asking a coarser-grained view to filter by something outside its grain
+is simply outside what that view can answer -- the caller already chose
+which MV/endpoint to query, so this isn't a request to reject, it's a
+no-op for that one filter.
 
 `brand` is deliberately not listed here: it's always required and resolved
 to brand_id before reaching the filter engine (apps.analytics.views), never
@@ -24,11 +24,6 @@ to make them filterable, not a query rewrite.
 """
 
 MV_COLUMNS = {
-    "mv_sales_summary": {
-        "financial_year": "financial_year",
-        "month": "month_no",
-        "season": "season_code",
-    },
     "mv_store_perf": {
         "store": "store_code",
         "city": "city",

@@ -112,7 +112,8 @@ class FilterOptionsView(APIView):
 
 
 class DashboardSummaryView(APIView):
-    """Total/MRP/Net sales + total discount, broken down by season."""
+    """Total/MRP/Net sales + total discount, broken down by financial
+    year."""
 
     permission_classes = [IsAuthenticated]
 
@@ -130,6 +131,21 @@ class DashboardSummaryView(APIView):
         return Response(
             {**data, "brand_code": brand.brand_code, "cache_hit": cache_hit, "cached_at": cached_at}
         )
+
+
+class DashboardFilterOptionsView(APIView):
+    """Distinct financial years/categories/sub_categories/stores actually
+    present in this brand's data, for populating the Dashboard's own
+    filter dropdowns (a simplified 6-field set -- brand/year/month/
+    category/sub_category/store -- per client feedback, separate from the
+    full filter bar the other analytics pages still use)."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[BRAND_CODE_PARAM])
+    def get(self, request):
+        brand = _resolve_brand(request)
+        return Response(queries.dashboard_filter_options(brand.brand_id))
 
 
 class StorePerfView(APIView):

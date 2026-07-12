@@ -2,6 +2,7 @@ import { apiClient } from './client'
 import type {
   AnalyticsResponse,
   CategoryPerfRow,
+  DashboardFilterOptions,
   DashboardSummary,
   FilterAttribute,
   Filters,
@@ -15,6 +16,16 @@ import type {
 export async function fetchFilterOptions(): Promise<FilterAttribute[]> {
   const { data } = await apiClient.get<{ filters: FilterAttribute[] }>('/analytics/filters/')
   return data.filters
+}
+
+export async function fetchDashboardFilterOptions(
+  brandCode: string,
+): Promise<DashboardFilterOptions> {
+  const { data } = await apiClient.get<DashboardFilterOptions>(
+    '/analytics/dashboard/filter-options/',
+    { params: { brand_code: brandCode } },
+  )
+  return data
 }
 
 export async function fetchDashboardSummary(
