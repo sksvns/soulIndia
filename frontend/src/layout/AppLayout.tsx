@@ -86,7 +86,7 @@ export function AppLayout() {
               </span>
             </Dropdown>
           </Header>
-          <FilterBar />
+          {location.pathname !== '/upload' && <FilterBar />}
           <Content style={{ margin: 16 }}>
             <Outlet />
           </Content>

@@ -16,3 +16,19 @@ export function formatINR(value: number): string {
 export function formatNumber(value: number): string {
   return INR_NUMBER.format(value)
 }
+
+// "as of <time>" for a cached analytics response -- coarse buckets rather
+// than a live-ticking clock, since it's only ever read right after a
+// fetch/refresh, not kept on screen long enough for the bucket to matter.
+export function formatRelativeTime(isoString: string): string {
+  const then = new Date(isoString).getTime()
+  const diffSeconds = Math.round((Date.now() - then) / 1000)
+  if (diffSeconds < 5) return 'just now'
+  if (diffSeconds < 60) return `${diffSeconds}s ago`
+  const diffMinutes = Math.round(diffSeconds / 60)
+  if (diffMinutes < 60) return `${diffMinutes}m ago`
+  const diffHours = Math.round(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  const diffDays = Math.round(diffHours / 24)
+  return `${diffDays}d ago`
+}

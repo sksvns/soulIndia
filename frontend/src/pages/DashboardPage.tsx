@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Row, Col, Card, Statistic, Spin, Empty, Alert, Tag } from 'antd'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Row, Col, Card, Statistic, Spin, Empty, Alert } from 'antd'
 import ReactECharts from 'echarts-for-react'
 import { fetchDashboardSummary } from '../api/analytics'
 import { useFilters } from '../filters/FilterContext'
+import { CacheStatus } from '../components/CacheStatus'
 import { formatINR, formatNumber } from '../utils/format'
 import type { DashboardSummary } from '../types'
 
@@ -38,27 +39,36 @@ export function DashboardPage() {
   const { brand, filters } = useFilters()
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const requestId = useRef(0)
+
+  const load = useCallback(
+    (refresh: boolean) => {
+      if (!brand) return
+      const id = ++requestId.current
+      const setBusy = refresh ? setRefreshing : setLoading
+      setBusy(true)
+      setError(null)
+      fetchDashboardSummary(brand, filters, refresh)
+        .then((data) => {
+          if (id === requestId.current) setSummary(data)
+        })
+        .catch(() => {
+          if (id === requestId.current) {
+            setError('Could not load the dashboard for this brand/filter selection.')
+          }
+        })
+        .finally(() => {
+          if (id === requestId.current) setBusy(false)
+        })
+    },
+    [brand, filters],
+  )
 
   useEffect(() => {
-    if (!brand) return
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    fetchDashboardSummary(brand, filters)
-      .then((data) => {
-        if (!cancelled) setSummary(data)
-      })
-      .catch(() => {
-        if (!cancelled) setError('Could not load the dashboard for this brand/filter selection.')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [brand, filters])
+    load(false)
+  }, [load])
 
   if (!brand) {
     return <Empty description="Select a brand to see its dashboard" />
@@ -114,7 +124,14 @@ export function DashboardPage() {
           <Card
             title="Sales by season"
             style={{ marginTop: 16 }}
-            extra={summary.cache_hit ? <Tag color="green">cached</Tag> : <Tag>live</Tag>}
+            extra={
+              <CacheStatus
+                cacheHit={summary.cache_hit}
+                cachedAt={summary.cached_at}
+                refreshing={refreshing}
+                onRefresh={() => load(true)}
+              />
+            }
           >
             {summary.by_season.length > 0 ? (
               <ReactECharts option={seasonChartOption(summary)} style={{ height: 360 }} />

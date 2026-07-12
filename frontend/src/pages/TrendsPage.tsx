@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Card, Segmented, Select, Input, Empty, Alert, Space, Typography, Spin } from 'antd'
 import ReactECharts from 'echarts-for-react'
 import { fetchCategoryTrend, fetchStoreTrend } from '../api/analytics'
 import { useFilters } from '../filters/FilterContext'
+import { CacheStatus } from '../components/CacheStatus'
 import { formatINR, formatNumber } from '../utils/format'
 import type { TrendDimension, TrendMetric, TrendPoint } from '../types'
 
@@ -57,48 +58,61 @@ export function TrendsPage() {
   const [metric, setMetric] = useState<TrendMetric>('net')
   const [storeCode, setStoreCode] = useState('')
   const [points, setPoints] = useState<TrendPoint[]>([])
+  const [cacheHit, setCacheHit] = useState(false)
+  const [cachedAt, setCachedAt] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const requestId = useRef(0)
+
+  const load = useCallback(
+    (refresh: boolean) => {
+      if (!brand) return
+      const id = ++requestId.current
+      const setBusy = refresh ? setRefreshing : setLoading
+      setBusy(true)
+      setError(null)
+      const request =
+        entity === 'store'
+          ? fetchStoreTrend(brand, dimension, metric, storeCode, refresh)
+          : fetchCategoryTrend(
+              brand,
+              dimension,
+              metric,
+              filters.category,
+              filters.sub_category,
+              filters.store,
+              refresh,
+            )
+      request
+        .then((data) => {
+          if (id !== requestId.current) return
+          setPoints(data.results)
+          setCacheHit(data.cache_hit)
+          setCachedAt(data.cached_at)
+        })
+        .catch(() => {
+          if (id === requestId.current) setError('Could not load trend data for this selection.')
+        })
+        .finally(() => {
+          if (id === requestId.current) setBusy(false)
+        })
+    },
+    [
+      brand,
+      entity,
+      dimension,
+      metric,
+      storeCode,
+      filters.category,
+      filters.sub_category,
+      filters.store,
+    ],
+  )
 
   useEffect(() => {
-    if (!brand) return
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    const request =
-      entity === 'store'
-        ? fetchStoreTrend(brand, dimension, metric, storeCode)
-        : fetchCategoryTrend(
-            brand,
-            dimension,
-            metric,
-            filters.category,
-            filters.sub_category,
-            filters.store,
-          )
-    request
-      .then((data) => {
-        if (!cancelled) setPoints(data)
-      })
-      .catch(() => {
-        if (!cancelled) setError('Could not load trend data for this selection.')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [
-    brand,
-    entity,
-    dimension,
-    metric,
-    storeCode,
-    filters.category,
-    filters.sub_category,
-    filters.store,
-  ])
+    load(false)
+  }, [load])
 
   if (!brand) {
     return <Empty description="Select a brand to see its trends" />
@@ -144,6 +158,14 @@ export function TrendsPage() {
               value={storeCode}
               onChange={(e) => setStoreCode(e.target.value)}
               allowClear
+            />
+          )}
+          {cachedAt && (
+            <CacheStatus
+              cacheHit={cacheHit}
+              cachedAt={cachedAt}
+              refreshing={refreshing}
+              onRefresh={() => load(true)}
             />
           )}
         </Space>

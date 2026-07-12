@@ -11,6 +11,7 @@ import hashlib
 import json
 
 from django.core.cache import cache
+from django.utils import timezone
 
 DEFAULT_TTL = 900  # 15 minutes; explicit bust on upload is the real freshness guarantee
 
@@ -40,12 +41,31 @@ def _cache_key(brand_id: int, endpoint: str, filters: dict) -> str:
     return f"analytics:{brand_id}:v{version}:{endpoint}:{filter_hash}"
 
 
-def get_or_compute(brand_id: int, endpoint: str, filters: dict, compute_fn, ttl: int = DEFAULT_TTL):
-    """Returns (result, was_cache_hit)."""
+def get_or_compute(
+    brand_id: int,
+    endpoint: str,
+    filters: dict,
+    compute_fn,
+    ttl: int = DEFAULT_TTL,
+    force_refresh: bool = False,
+):
+    """Returns (result, was_cache_hit, cached_at). cached_at is an ISO-8601
+    timestamp of when compute_fn last actually ran for this exact
+    brand/endpoint/filters combination -- set on every write, read back
+    unchanged on every hit, so the frontend can show "as of <time>"
+    regardless of whether this particular call was a hit or a miss.
+
+    force_refresh=True (the manual refresh button) skips the cache read
+    entirely and always recomputes, same as a miss would, refreshing
+    cached_at too -- it does not bump the per-brand version, so it has no
+    effect on any other in-flight filter combination's cache entries.
+    """
     key = _cache_key(brand_id, endpoint, filters)
-    cached = cache.get(key)
-    if cached is not None:
-        return cached, True
+    if not force_refresh:
+        cached = cache.get(key)
+        if cached is not None:
+            return cached["data"], True, cached["cached_at"]
     result = compute_fn()
-    cache.set(key, result, timeout=ttl)
-    return result, False
+    cached_at = timezone.now().isoformat()
+    cache.set(key, {"data": result, "cached_at": cached_at}, timeout=ttl)
+    return result, False, cached_at

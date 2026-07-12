@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Table, Select, Card, Empty, Alert, Space, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { fetchStorePerf } from '../api/analytics'
 import { useFilters } from '../filters/FilterContext'
+import { CacheStatus } from '../components/CacheStatus'
 import { formatINR, formatNumber } from '../utils/format'
 import type { OrderBy, StorePerfRow } from '../types'
 
@@ -52,28 +53,40 @@ export function StoresPage() {
   const { brand, filters } = useFilters()
   const [orderBy, setOrderBy] = useState<OrderBy>('net')
   const [rows, setRows] = useState<StorePerfRow[]>([])
+  const [cacheHit, setCacheHit] = useState(false)
+  const [cachedAt, setCachedAt] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const requestId = useRef(0)
+
+  const load = useCallback(
+    (refresh: boolean) => {
+      if (!brand) return
+      const id = ++requestId.current
+      const setBusy = refresh ? setRefreshing : setLoading
+      setBusy(true)
+      setError(null)
+      fetchStorePerf(brand, filters, orderBy, refresh)
+        .then((data) => {
+          if (id !== requestId.current) return
+          setRows(data.results)
+          setCacheHit(data.cache_hit)
+          setCachedAt(data.cached_at)
+        })
+        .catch(() => {
+          if (id === requestId.current) setError('Could not load store performance for this selection.')
+        })
+        .finally(() => {
+          if (id === requestId.current) setBusy(false)
+        })
+    },
+    [brand, filters, orderBy],
+  )
 
   useEffect(() => {
-    if (!brand) return
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    fetchStorePerf(brand, filters, orderBy)
-      .then((data) => {
-        if (!cancelled) setRows(data)
-      })
-      .catch(() => {
-        if (!cancelled) setError('Could not load store performance for this selection.')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [brand, filters, orderBy])
+    load(false)
+  }, [load])
 
   if (!brand) {
     return <Empty description="Select a brand to see its store-wise performance" />
@@ -95,6 +108,14 @@ export function StoresPage() {
             onChange={setOrderBy}
             options={ORDER_BY_OPTIONS}
           />
+          {cachedAt && (
+            <CacheStatus
+              cacheHit={cacheHit}
+              cachedAt={cachedAt}
+              refreshing={refreshing}
+              onRefresh={() => load(true)}
+            />
+          )}
         </Space>
       }
     >

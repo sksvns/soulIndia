@@ -34,6 +34,17 @@ export interface DashboardSummary {
   by_season: SeasonBreakdown[]
   brand_code: string
   cache_hit: boolean
+  cached_at: string
+}
+
+// Shape shared by every analytics list endpoint (stores/categories/
+// trends) -- cache_hit/cached_at ride alongside the actual results so the
+// UI can show "as of <time>" and a manual refresh control consistently.
+export interface AnalyticsResponse<T> {
+  results: T
+  brand_code: string
+  cache_hit: boolean
+  cached_at: string
 }
 
 // Global filter bar state -- keys match attribute_registry canonical_name
