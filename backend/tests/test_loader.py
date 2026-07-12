@@ -9,6 +9,7 @@ from django.db.models import Sum
 from apps.ingestion.loader import (
     DataAlterationNotPermitted,
     determine_slices,
+    find_conflicting_slices,
     load_batch,
     month_bounds,
     rollback_batch,
@@ -345,3 +346,37 @@ def test_data_inserter_is_blocked_from_rolling_back_a_loaded_batch(
     audit = DataAlterationAudit.objects.get()
     assert audit.allowed is False
     assert audit.action == DataAlterationAudit.Action.ROLLBACK
+
+
+@pytest.mark.django_db
+def test_find_conflicting_slices_uses_one_query_regardless_of_slice_count(
+    django_assert_num_queries, killer_brand_and_config, data_inserter_user
+):
+    """A historical re-upload of a file that already has months of data
+    loaded can touch hundreds of (store, month) slices at once -- this
+    must stay a single grouped query, not one query per slice."""
+    brand, config = killer_brand_and_config
+    batch = _make_batch(brand, config, data_inserter_user)
+    load_batch(batch, _validated_rows(brand, config, KILLER_GOOD_ROWS))
+
+    loaded_row = FactSales.objects.filter(batch=batch).first()
+    # A mix of slices that do and don't already have data, at a size that
+    # would clearly show up as multiple queries if the old per-slice loop
+    # ever came back.
+    slices = {(loaded_row.store_id, 2023, 4): [1]}
+    for month in range(1, 13):
+        slices[(loaded_row.store_id, 2020, month)] = [1]  # no data loaded here
+
+    with django_assert_num_queries(1):
+        conflicts = find_conflicting_slices(brand.brand_id, slices)
+
+    assert len(conflicts) == 1
+    assert conflicts[0]["store_id"] == loaded_row.store_id
+    assert conflicts[0]["year"] == 2023
+    assert conflicts[0]["month"] == 4
+    assert conflicts[0]["existing_row_count"] == 3
+
+
+@pytest.mark.django_db
+def test_find_conflicting_slices_returns_empty_for_no_slices():
+    assert find_conflicting_slices(1, {}) == []

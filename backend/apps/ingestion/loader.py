@@ -16,6 +16,8 @@ from calendar import monthrange
 from datetime import date, timedelta
 
 from django.db import connection, transaction
+from django.db.models import Count
+from django.db.models.functions import TruncMonth
 from psycopg.types.json import Jsonb
 
 from . import dimension_resolver
@@ -80,13 +82,37 @@ def determine_slices(rows: list[dict]) -> dict[tuple, list[dict]]:
 
 def find_conflicting_slices(brand_id: int, slices: dict) -> list[dict]:
     """Slices that already have fact_sales rows -- loading over them is an
-    alteration of existing data (ADR-0003), not a fresh load."""
+    alteration of existing data (ADR-0003), not a fresh load. One grouped
+    query covering every slice in the batch, not one query per slice -- a
+    historical re-upload of a file that already has months of data loaded
+    can touch hundreds of (store, month) slices at once."""
+    if not slices:
+        return []
+
+    store_ids = {key[0] for key in slices}
+    bounds = [month_bounds(year, month) for _, year, month in slices]
+    overall_start = min(start for start, _ in bounds)
+    overall_end = max(end for _, end in bounds)
+
+    existing_counts = (
+        FactSales.objects.filter(
+            brand_id=brand_id,
+            store_id__in=store_ids,
+            sale_date__gte=overall_start,
+            sale_date__lt=overall_end,
+        )
+        .annotate(month=TruncMonth("sale_date"))
+        .values("store_id", "month")
+        .annotate(existing_row_count=Count("sale_id"))
+    )
+    existing_by_slice = {
+        (row["store_id"], row["month"].year, row["month"].month): row["existing_row_count"]
+        for row in existing_counts
+    }
+
     conflicts = []
     for store_id, year, month in slices:
-        start, end = month_bounds(year, month)
-        existing_count = FactSales.objects.filter(
-            brand_id=brand_id, store_id=store_id, sale_date__gte=start, sale_date__lt=end
-        ).count()
+        existing_count = existing_by_slice.get((store_id, year, month), 0)
         if existing_count > 0:
             conflicts.append(
                 {
