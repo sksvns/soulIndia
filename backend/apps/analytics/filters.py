@@ -43,15 +43,38 @@ MV_COLUMNS = {
         "season": "season_code",
         "discount_range": "discount_bucket",
     },
+    # Same table as mv_category_perf, but for the Dashboard's own queries
+    # only (queries._dashboard_yearly_breakdown/_dashboard_monthly_
+    # breakdown) -- store filters by store_name here, not store_code.
+    # store_code is only unique *within* a brand (each brand assigns its
+    # own), while the Dashboard can show every active brand combined
+    # (client feedback), so the same physical store shows up once per
+    # brand under a different code; store_name is what the client
+    # actually confirmed is stable/unique per store within a brand and
+    # shared across brands for the same real-world location. Every other
+    # page (Stores/Categories/Trends) is always scoped to one brand, where
+    # store_name and store_code are already 1:1 -- this split only matters
+    # for the one view that can span brands.
+    "dashboard_category_perf": {
+        "store": "store_name",
+        "category": "category",
+        "sub_category": "sub_category",
+        "gender": "gender",
+        "financial_year": "financial_year",
+        "month": "month_no",
+        "season": "season_code",
+        "discount_range": "discount_bucket",
+    },
     # Not a materialized view -- the one deliberate exception (see
     # queries._dashboard_weekly_breakdown's docstring). financial_year/month
     # aren't listed here because that query pins those via dim_calendar
     # directly rather than through this generic filter engine; this entry
     # only covers the filters that can still narrow a single brand-month
     # further (category/sub_category/store), joined in from dim_product/
-    # dim_store.
+    # dim_store. store filters by name for the same reason as
+    # dashboard_category_perf above.
     "fact_sales": {
-        "store": "st.store_code",
+        "store": "st.store_name",
         "category": "p.category",
         "sub_category": "p.sub_category",
         "gender": "p.gender",

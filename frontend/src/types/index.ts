@@ -40,18 +40,16 @@ export interface DashboardSummary {
   cached_at: string
 }
 
-export interface DashboardStoreOption {
-  store_code: string
-  store_name: string
-}
-
 // Distinct values actually present in a brand's data, for the Dashboard's
-// own simplified filter bar (brand/year/month/category/sub_category/store)
+// own simplified filter bar (brand/year/month/category/sub_category/store).
+// stores is store *names*, not codes -- deduped across brands so the same
+// physical store (a different store_code per brand) appears once, not
+// once per brand (client feedback).
 export interface DashboardFilterOptions {
   financial_years: string[]
   categories: string[]
   sub_categories: string[]
-  stores: DashboardStoreOption[]
+  stores: string[]
 }
 
 // Shape shared by every analytics list endpoint (stores/categories/

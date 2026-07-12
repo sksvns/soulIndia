@@ -68,7 +68,7 @@ def _dashboard_yearly_breakdown(brand_ids: list[int], filters: dict) -> list[dic
     dashboard is also filterable by category/sub_category/store, which
     only a view with that grain can answer; summing all the way up to just
     financial_year here still yields correct brand-wide totals."""
-    where_sql, where_params = build_where("mv_category_perf", filters)
+    where_sql, where_params = build_where("dashboard_category_perf", filters)
     extra_where = f"AND {where_sql}" if where_sql else ""
     sql = f"""
         SELECT
@@ -99,7 +99,7 @@ def _dashboard_monthly_breakdown(brand_ids: list[int], filters: dict) -> list[di
     across years. Ordered by calendar_year then month_no (not month_no
     alone) so April..March reads left-to-right, matching the fiscal
     year's actual month order."""
-    where_sql, where_params = build_where("mv_category_perf", filters)
+    where_sql, where_params = build_where("dashboard_category_perf", filters)
     extra_where = f"AND {where_sql}" if where_sql else ""
     sql = f"""
         SELECT
@@ -179,7 +179,16 @@ def dashboard_filter_options(brand_ids: list[int]) -> dict:
     populating the Dashboard's filter dropdowns -- never a static list, so
     a dropdown never offers a year/category/store with zero data behind
     it. Same source view as dashboard_summary itself, same brand_ids-is-
-    always-a-list convention (one brand or every active brand)."""
+    always-a-list convention (one brand or every active brand).
+
+    Stores are listed by store_name, deduped across brand_ids, not by
+    store_code: each brand assigns its own code to the same physical
+    store, so "every active brand" would otherwise list e.g. "CHANDA MAMA
+    - HAJIPUR" three times, once per brand's code for it (client
+    feedback). dashboard_summary's store filter matches this same
+    store_name-based identity (see filters.MV_COLUMNS'
+    dashboard_category_perf/fact_sales entries), so picking one combines
+    that store's data across every brand that has it."""
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT DISTINCT financial_year FROM mv_category_perf "
@@ -203,11 +212,11 @@ def dashboard_filter_options(brand_ids: list[int]) -> dict:
         sub_categories = [row[0] for row in cursor.fetchall()]
 
         cursor.execute(
-            "SELECT DISTINCT store_code, store_name FROM mv_category_perf "
-            "WHERE brand_id = ANY(%s) ORDER BY store_name",
+            "SELECT DISTINCT store_name FROM mv_category_perf "
+            "WHERE brand_id = ANY(%s) AND store_name IS NOT NULL ORDER BY store_name",
             [brand_ids],
         )
-        stores = [{"store_code": row[0], "store_name": row[1]} for row in cursor.fetchall()]
+        stores = [row[0] for row in cursor.fetchall()]
 
     return {
         "financial_years": financial_years,
