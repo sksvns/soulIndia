@@ -341,15 +341,122 @@ def test_dashboard_combines_same_store_name_across_brands_when_all_brands_select
 
 
 @pytest.mark.django_db
-def test_store_perf_top10_orders_by_requested_column(loaded_killer_data):
+def test_store_perf_orders_by_requested_column(loaded_killer_data):
     brand = loaded_killer_data
 
-    by_net = queries.store_perf_top10(brand.brand_id, order_by="net")
-    assert len(by_net) == 1  # all 3 rows are the same single store, ESIS170
-    assert by_net[0]["store_code"] == "ESIS170"
-    assert by_net[0]["net_value"] == EXPECTED_TOTAL_NET
-    assert by_net[0]["mrp_value"] == EXPECTED_TOTAL_MRP
-    assert by_net[0]["discount_pct"] is not None
+    rows, total_count = queries.store_perf([brand.brand_id], order_by="net")
+    assert total_count == 1  # all 3 rows are the same single store, ESIS170
+    assert len(rows) == 1
+    assert rows[0]["store_code"] == "ESIS170"
+    assert rows[0]["net_value"] == EXPECTED_TOTAL_NET
+    assert rows[0]["mrp_value"] == EXPECTED_TOTAL_MRP
+    assert rows[0]["discount_pct"] is not None
+
+
+def _many_store_rows(n):
+    """n distinct stores, one row each, ascending net_value -- purely
+    synthetic data for exercising pagination (client feedback: sorting +
+    paging over the complete result, not just one loaded page)."""
+    return [
+        {
+            **KILLER_GOOD_ROWS[0],
+            "BILL NO \nINVOICE NO": 900 + i,
+            "STORE CODE": f"PGSTORE{i:02d}",
+            "NAME": f"PAGINATION STORE {i:02d}",
+            "MRP": 1000 + i * 100,
+            "QTY \nSALE": 1,
+            "NET \nSALE \nVALUE": 1000 + i * 100,
+            "DISCOUNT \nVALUE": 0,
+            "MRP \nSALE \nVALUE": 1000 + i * 100,
+        }
+        for i in range(1, n + 1)
+    ]
+
+
+@pytest.fixture
+def loaded_many_stores_data(killer_brand_and_config, data_inserter_user):
+    from apps.ingestion.models import UploadBatch
+
+    brand, config = killer_brand_and_config
+    batch = UploadBatch.objects.create(
+        brand=brand,
+        config=config,
+        uploaded_by=data_inserter_user,
+        file_name="many_stores.xlsx",
+        object_key="uploads/killer/menswear/many_stores.xlsx",
+    )
+    result = run_pipeline(brand, config, killer_workbook(_many_store_rows(15)), "many_stores.xlsx")
+    assert result.ok, result.errors
+    load_batch(batch, result.rows)
+    refresh_all()
+    return brand
+
+
+@pytest.mark.django_db
+def test_store_perf_pages_over_the_full_sorted_result_not_just_one_page(
+    loaded_many_stores_data,
+):
+    """15 stores, each a distinct net_value -- proves paging happens over
+    the whole ORDER-BY'd result: page 2 continues the same descending
+    ranking, it doesn't independently re-sort just its own 5 rows."""
+    brand = loaded_many_stores_data
+
+    page1, total = queries.store_perf([brand.brand_id], order_by="net", limit=10, offset=0)
+    assert total == 15
+    assert len(page1) == 10
+    assert [r["net_value"] for r in page1] == sorted((r["net_value"] for r in page1), reverse=True)
+    assert page1[0]["net_value"] == Decimal("2500.00")  # highest, i=15
+    assert page1[-1]["net_value"] == Decimal("1600.00")  # 10th highest, i=6
+
+    page2, total2 = queries.store_perf([brand.brand_id], order_by="net", limit=10, offset=10)
+    assert total2 == 15
+    assert len(page2) == 5
+    assert page2[0]["net_value"] == Decimal("1500.00")  # i=5, ranking continues from page 1
+    assert page2[-1]["net_value"] == Decimal("1100.00")  # i=1, lowest overall
+
+    all_rows, total3 = queries.store_perf([brand.brand_id], order_by="net", limit=None, offset=0)
+    assert total3 == 15
+    assert len(all_rows) == 15
+
+
+@pytest.mark.django_db
+def test_store_perf_total_count_correct_even_when_page_is_out_of_range(
+    loaded_many_stores_data,
+):
+    """Requesting a page past the last row must still report the true
+    total_count, not 0 -- an out-of-range page has no rows to read a
+    COUNT(*) OVER() window value from, so total_count has to come from a
+    genuinely separate query."""
+    brand = loaded_many_stores_data
+
+    rows, total = queries.store_perf([brand.brand_id], order_by="net", limit=10, offset=100)
+    assert rows == []
+    assert total == 15
+
+
+@pytest.mark.django_db
+def test_store_perf_combines_every_brand_when_no_single_brand_requested(
+    loaded_killer_and_pepe_data,
+):
+    """Client feedback: the Stores page's default view is every active
+    brand combined too, same as the Dashboard."""
+    killer, pepe = loaded_killer_and_pepe_data
+
+    killer_only, killer_total = queries.store_perf([killer.brand_id], limit=None)
+    pepe_only, pepe_total = queries.store_perf([pepe.brand_id], limit=None)
+    combined, combined_total = queries.store_perf([killer.brand_id, pepe.brand_id], limit=None)
+
+    assert combined_total == killer_total + pepe_total
+    assert len(combined) == len(killer_only) + len(pepe_only)
+
+
+@pytest.mark.django_db
+def test_store_filter_options_reflects_real_data_only(loaded_trend_data):
+    brand = loaded_trend_data
+
+    options = queries.store_filter_options([brand.brand_id])
+
+    assert options["financial_years"] == ["23-24", "24-25"]
 
 
 @pytest.mark.django_db

@@ -7,6 +7,9 @@ import type {
   FilterAttribute,
   Filters,
   OrderBy,
+  PageSize,
+  PaginatedAnalyticsResponse,
+  StoreFilterOptions,
   StorePerfRow,
   TrendDimension,
   TrendMetric,
@@ -42,14 +45,37 @@ export async function fetchDashboardSummary(
   return data
 }
 
+// brandCode is optional here too (client feedback) -- omitted means
+// every active brand combined, same convention as the Dashboard.
 export async function fetchStorePerf(
-  brandCode: string,
+  brandCode: string | undefined,
   filters: Filters,
   orderBy: OrderBy,
+  page: number,
+  pageSize: PageSize,
   refresh = false,
-): Promise<AnalyticsResponse<StorePerfRow[]>> {
-  const { data } = await apiClient.get<AnalyticsResponse<StorePerfRow[]>>('/analytics/stores/', {
-    params: { brand_code: brandCode, order_by: orderBy, ...filters, refresh: refresh || undefined },
+): Promise<PaginatedAnalyticsResponse<StorePerfRow[]>> {
+  const { data } = await apiClient.get<PaginatedAnalyticsResponse<StorePerfRow[]>>(
+    '/analytics/stores/',
+    {
+      params: {
+        brand_code: brandCode,
+        order_by: orderBy,
+        page,
+        page_size: pageSize,
+        ...filters,
+        refresh: refresh || undefined,
+      },
+    },
+  )
+  return data
+}
+
+export async function fetchStoreFilterOptions(
+  brandCode: string | undefined,
+): Promise<StoreFilterOptions> {
+  const { data } = await apiClient.get<StoreFilterOptions>('/analytics/stores/filter-options/', {
+    params: { brand_code: brandCode },
   })
   return data
 }

@@ -226,33 +226,72 @@ def dashboard_filter_options(brand_ids: list[int]) -> dict:
     }
 
 
-def store_perf_top10(brand_id: int, filters: dict = None, order_by: str = "net") -> list[dict]:
-    order_column = STORE_ORDER_COLUMNS.get(order_by, "net_value")
+def store_perf(
+    brand_ids: list[int],
+    filters: dict = None,
+    order_by: str = "net",
+    limit: int | None = 10,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Every store matching brand_ids/filters, ranked by order_by --
+    sorted and paged entirely in SQL over the complete aggregated result
+    (client feedback: sorting must apply to all the data, not just
+    whichever page is currently loaded). limit=None returns every row
+    unpaged (the "All" page-size choice).
+
+    total_count is queried separately from the paged rows, not via a
+    COUNT(*) OVER() window column on the same query: a window column only
+    surfaces on rows the final LIMIT/OFFSET actually returns, so an
+    out-of-range page (e.g. offset past the last row, or a filter that
+    now matches fewer rows than before) would come back with zero rows
+    and no way to read a correct total from them."""
     where_sql, where_params = build_where("mv_store_perf", filters)
     extra_where = f"AND {where_sql}" if where_sql else ""
-    sql = f"""
-        WITH agg AS (
-            SELECT
-                store_id, store_code, store_name, city, zone,
-                SUM(mrp_value) AS mrp_value,
-                SUM(net_value) AS net_value,
-                SUM(discount_value) AS discount_value,
-                SUM(quantity) AS quantity
-            FROM mv_store_perf
-            WHERE brand_id = %(brand_id)s {extra_where}
-            GROUP BY store_id, store_code, store_name, city, zone
-        )
+    agg_sql = f"""
+        SELECT
+            store_id, store_code, store_name, city, zone,
+            SUM(mrp_value) AS mrp_value,
+            SUM(net_value) AS net_value,
+            SUM(discount_value) AS discount_value,
+            SUM(quantity) AS quantity
+        FROM mv_store_perf
+        WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+        GROUP BY store_id, store_code, store_name, city, zone
+    """
+    order_column = STORE_ORDER_COLUMNS.get(order_by, "net_value")
+    limit_sql = "LIMIT %(limit)s OFFSET %(offset)s" if limit is not None else ""
+    page_sql = f"""
+        WITH agg AS ({agg_sql})
         SELECT *,
             CASE WHEN mrp_value = 0 THEN NULL
                  ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
         FROM agg
         ORDER BY {order_column} DESC NULLS LAST
-        LIMIT 10
+        {limit_sql}
     """
-    params = {"brand_id": brand_id, **where_params}
+    params = {"brand_ids": brand_ids, **where_params}
     with connection.cursor() as cursor:
-        cursor.execute(sql, params)
-        return _dictfetchall(cursor)
+        cursor.execute(f"SELECT COUNT(*) FROM ({agg_sql}) counted", params)
+        total_count = cursor.fetchone()[0]
+
+        cursor.execute(page_sql, {**params, "limit": limit, "offset": offset})
+        rows = _dictfetchall(cursor)
+    return rows, total_count
+
+
+def store_filter_options(brand_ids: list[int]) -> dict:
+    """Distinct financial years actually present, for the Stores page's
+    own simplified filter bar's Year dropdown (client feedback: brand
+    optional/all-combined by default, other filters as live dropdowns --
+    same convention as the Dashboard's own filter bar)."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT DISTINCT financial_year FROM mv_store_perf "
+            "WHERE brand_id = ANY(%s) ORDER BY financial_year",
+            [brand_ids],
+        )
+        financial_years = [row[0] for row in cursor.fetchall()]
+    return {"financial_years": financial_years}
 
 
 def category_perf_top10(brand_id: int, filters: dict = None, order_by: str = "net") -> list[dict]:

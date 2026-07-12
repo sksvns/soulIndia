@@ -86,7 +86,7 @@ export function AppLayout() {
               </span>
             </Dropdown>
           </Header>
-          {location.pathname !== '/upload' && location.pathname !== '/' && <FilterBar />}
+          {!['/upload', '/', '/stores'].includes(location.pathname) && <FilterBar />}
           <Content style={{ margin: 16 }}>
             <Outlet />
           </Content>
