@@ -99,7 +99,8 @@ def test_dashboard_summary_matches_hand_computed_totals_to_the_paisa(loaded_kill
     # All of KILLER_GOOD_ROWS falls in the same financial year (23-24), so
     # the year breakdown is a single row matching the brand-wide total --
     # multi-year grouping itself is covered by the dedicated test below.
-    by_year = {row["financial_year"]: row for row in result["by_year"]}
+    assert result["granularity"] == "year"
+    by_year = {row["label"]: row for row in result["breakdown"]}
     assert set(by_year) == {"23-24"}
     assert by_year["23-24"]["net_value"] == EXPECTED_TOTAL_NET
     assert by_year["23-24"]["mrp_value"] == EXPECTED_TOTAL_MRP
@@ -117,6 +118,63 @@ def test_dashboard_summary_filters_by_financial_year_and_month(loaded_killer_dat
 
     no_match_month = queries.dashboard_summary([brand.brand_id], {"month": 5})
     assert no_match_month["total"]["net_value"] == 0
+
+
+@pytest.mark.django_db
+def test_dashboard_summary_switches_to_monthly_breakdown_when_only_year_selected(
+    loaded_trend_data,
+):
+    """Client feedback: picking a year should chart that year's months,
+    not stay flat at a single year-wide bar."""
+    brand = loaded_trend_data
+
+    result = queries.dashboard_summary([brand.brand_id], {"financial_year": "23-24"})
+
+    assert result["granularity"] == "month"
+    by_month = {row["label"]: row for row in result["breakdown"]}
+    assert list(by_month) == ["April", "July", "October"]  # fiscal chronological order
+    assert by_month["April"]["net_value"] == Decimal("1500.00")  # rows 501 + 505
+    assert by_month["July"]["net_value"] == Decimal("1800.00")  # row 502
+    assert by_month["October"]["net_value"] == Decimal("1500.00")  # row 503
+    assert result["total"]["net_value"] == Decimal("4800.00")
+
+
+@pytest.mark.django_db
+def test_dashboard_summary_switches_to_weekly_breakdown_when_year_and_month_selected(
+    loaded_killer_data,
+):
+    """Client feedback: picking a year AND a month should chart that
+    month's weeks. KILLER_GOOD_ROWS' 3 rows land in 3 different ISO weeks
+    of April 2023 (Apr 5, Apr 15, Apr 26), so this also proves the weekly
+    fact_sales query -- the one deliberate exception to querying MVs only
+    -- returns the same rows/totals the MV-backed paths would."""
+    brand = loaded_killer_data
+
+    result = queries.dashboard_summary([brand.brand_id], {"financial_year": "23-24", "month": 4})
+
+    assert result["granularity"] == "week"
+    labels = [row["label"] for row in result["breakdown"]]
+    assert labels == ["Week 1", "Week 2", "Week 3"]
+    assert result["breakdown"][0]["net_value"] == Decimal("2124.00")  # Apr 5
+    assert result["breakdown"][1]["net_value"] == Decimal("-1519.00")  # Apr 15 return
+    assert result["breakdown"][2]["net_value"] == Decimal("2450.00")  # Apr 26
+    assert result["total"]["net_value"] == EXPECTED_TOTAL_NET
+
+
+@pytest.mark.django_db
+def test_dashboard_summary_weekly_breakdown_still_respects_category_filter(loaded_killer_data):
+    """The weekly path's own filter engine (fact_sales joined to
+    dim_product/dim_store) must narrow the same way the MV-backed paths
+    do, not just ignore category/store once granularity flips to week."""
+    brand = loaded_killer_data
+
+    shirts_only = queries.dashboard_summary(
+        [brand.brand_id], {"financial_year": "23-24", "month": 4, "category": "SHIRTS"}
+    )
+    assert shirts_only["granularity"] == "week"
+    # Apr 5 (SHIRTS, net 2124) + Apr 15 return (SHIRTS, net -1519); Apr 26 is JEANS.
+    assert shirts_only["total"]["net_value"] == Decimal("605.00")
+    assert len(shirts_only["breakdown"]) == 2
 
 
 @pytest.fixture
@@ -147,7 +205,8 @@ def test_dashboard_summary_groups_by_financial_year_not_season(loaded_trend_data
 
     result = queries.dashboard_summary([brand.brand_id])
 
-    by_year = {row["financial_year"]: row for row in result["by_year"]}
+    assert result["granularity"] == "year"
+    by_year = {row["label"]: row for row in result["breakdown"]}
     assert set(by_year) == {"23-24", "24-25"}
     assert by_year["23-24"]["net_value"] == Decimal("4800.00")
     assert by_year["23-24"]["mrp_value"] == Decimal("5000.00")
@@ -202,9 +261,9 @@ def test_dashboard_summary_combines_every_brand_when_no_single_brand_requested(
         killer_only["total"]["quantity"] + pepe_only["total"]["quantity"]
     )
     # Both brands' years appear in the combined breakdown, not just one.
-    combined_years = {row["financial_year"] for row in combined["by_year"]}
-    assert combined_years >= {row["financial_year"] for row in killer_only["by_year"]}
-    assert combined_years >= {row["financial_year"] for row in pepe_only["by_year"]}
+    combined_years = {row["label"] for row in combined["breakdown"]}
+    assert combined_years >= {row["label"] for row in killer_only["breakdown"]}
+    assert combined_years >= {row["label"] for row in pepe_only["breakdown"]}
 
 
 @pytest.mark.django_db
