@@ -8,29 +8,31 @@ import { DashboardFilterBar } from '../components/DashboardFilterBar'
 import { formatINR, formatNumber } from '../utils/format'
 import type { DashboardSummary, Filters } from '../types'
 
-function yearChartOption(summary: DashboardSummary) {
-  const years = summary.by_year.map((y) => y.financial_year ?? 'Unknown')
+const GRANULARITY_TITLE = { year: 'year', month: 'month', week: 'week' } as const
+
+function breakdownChartOption(summary: DashboardSummary) {
+  const labels = summary.breakdown.map((row) => row.label)
   return {
     tooltip: { trigger: 'axis', valueFormatter: (v: number) => formatINR(v) },
     legend: { data: ['MRP Sales', 'Net Sales', 'Discount'], top: 0 },
     grid: { left: 90, right: 24, bottom: 32, top: 48 },
-    xAxis: { type: 'category', data: years },
+    xAxis: { type: 'category', data: labels },
     yAxis: { type: 'value', axisLabel: { formatter: (v: number) => formatINR(v) } },
     series: [
       {
         name: 'MRP Sales',
         type: 'bar',
-        data: summary.by_year.map((y) => y.mrp_value),
+        data: summary.breakdown.map((row) => row.mrp_value),
       },
       {
         name: 'Net Sales',
         type: 'bar',
-        data: summary.by_year.map((y) => y.net_value),
+        data: summary.breakdown.map((row) => row.net_value),
       },
       {
         name: 'Discount',
         type: 'bar',
-        data: summary.by_year.map((y) => y.discount_value),
+        data: summary.breakdown.map((row) => row.discount_value),
       },
     ],
   }
@@ -150,7 +152,7 @@ export function DashboardPage() {
               </Row>
 
               <Card
-                title="Sales by year"
+                title={`Sales by ${GRANULARITY_TITLE[summary.granularity]}`}
                 style={{ marginTop: 16 }}
                 extra={
                   <CacheStatus
@@ -161,8 +163,8 @@ export function DashboardPage() {
                   />
                 }
               >
-                {summary.by_year.length > 0 ? (
-                  <ReactECharts option={yearChartOption(summary)} style={{ height: 400 }} />
+                {summary.breakdown.length > 0 ? (
+                  <ReactECharts option={breakdownChartOption(summary)} style={{ height: 400 }} />
                 ) : (
                   <Empty description="No data for this filter selection" />
                 )}

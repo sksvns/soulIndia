@@ -43,6 +43,19 @@ MV_COLUMNS = {
         "season": "season_code",
         "discount_range": "discount_bucket",
     },
+    # Not a materialized view -- the one deliberate exception (see
+    # queries._dashboard_weekly_breakdown's docstring). financial_year/month
+    # aren't listed here because that query pins those via dim_calendar
+    # directly rather than through this generic filter engine; this entry
+    # only covers the filters that can still narrow a single brand-month
+    # further (category/sub_category/store), joined in from dim_product/
+    # dim_store.
+    "fact_sales": {
+        "store": "st.store_code",
+        "category": "p.category",
+        "sub_category": "p.sub_category",
+        "gender": "p.gender",
+    },
 }
 
 

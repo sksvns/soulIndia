@@ -136,10 +136,13 @@ class FilterOptionsView(APIView):
 
 
 class DashboardSummaryView(APIView):
-    """Total/MRP/Net sales + total discount, broken down by financial
-    year. brand_code is optional -- omitted means every active brand
-    combined (client feedback: that's the dashboard's default view, with
-    brand as a filter to narrow down from there, not a precondition)."""
+    """Total/MRP/Net sales + total discount, broken down at a granularity
+    that adapts to the filter selection -- year by default, month once a
+    single year is picked, week once that year is narrowed to a single
+    month too (client feedback). brand_code is optional -- omitted means
+    every active brand combined (client feedback: that's the dashboard's
+    default view, with brand as a filter to narrow down from there, not a
+    precondition)."""
 
     permission_classes = [IsAuthenticated]
 

@@ -25,13 +25,16 @@ export interface Totals {
   quantity: number
 }
 
-export interface YearBreakdown extends Totals {
-  financial_year: string | null
+export type DashboardGranularity = 'year' | 'month' | 'week'
+
+export interface DashboardBreakdownRow extends Totals {
+  label: string
 }
 
 export interface DashboardSummary {
   total: Totals
-  by_year: YearBreakdown[]
+  breakdown: DashboardBreakdownRow[]
+  granularity: DashboardGranularity
   brand_code: string | null
   cache_hit: boolean
   cached_at: string

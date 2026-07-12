@@ -27,18 +27,47 @@ def _dictfetchall(cursor) -> list[dict]:
 
 
 def dashboard_summary(brand_ids: list[int], filters: dict = None) -> dict:
-    """Total/MRP/Net sales + total discount, broken down by financial year
-    (client feedback: year is the chart baseline, not season). Queries
-    mv_category_perf -- the same view category_perf_top10 uses -- rather
-    than a coarser (brand x FY x month x season)-only view, since the
-    dashboard is also filterable by category/sub_category/store, which
-    only a view with that grain can answer; summing all the way up to just
-    financial_year here still yields correct brand-wide totals.
+    """Total/MRP/Net sales + total discount, broken down at whichever
+    granularity the current filter selection can meaningfully chart
+    (client feedback): year by default, month once a single year is
+    picked, week once that year is narrowed to a single month too --
+    each level answering "what does the level below the one I just
+    picked look like", never a separate report type to choose.
 
     brand_ids is always a list -- a single selected brand passes a
     one-element list, "all brands" (client feedback: the dashboard's
-    default view) passes every active brand's id, so this is one query
-    path either way (brand_id = ANY(...)), not a conditional branch."""
+    default view) passes every active brand's id, so every branch below
+    is one query path either way (brand_id = ANY(...)), not a
+    conditional branch."""
+    filters = filters or {}
+    financial_year = filters.get("financial_year")
+    month = filters.get("month")
+
+    if financial_year and month:
+        granularity = "week"
+        breakdown = _dashboard_weekly_breakdown(brand_ids, financial_year, month, filters)
+    elif financial_year:
+        granularity = "month"
+        breakdown = _dashboard_monthly_breakdown(brand_ids, filters)
+    else:
+        granularity = "year"
+        breakdown = _dashboard_yearly_breakdown(brand_ids, filters)
+
+    total = {
+        "mrp_value": sum((row["mrp_value"] or 0) for row in breakdown),
+        "net_value": sum((row["net_value"] or 0) for row in breakdown),
+        "discount_value": sum((row["discount_value"] or 0) for row in breakdown),
+        "quantity": sum((row["quantity"] or 0) for row in breakdown),
+    }
+    return {"total": total, "breakdown": breakdown, "granularity": granularity}
+
+
+def _dashboard_yearly_breakdown(brand_ids: list[int], filters: dict) -> list[dict]:
+    """Queries mv_category_perf -- the same view category_perf_top10 uses --
+    rather than a coarser (brand x FY x month x season)-only view, since the
+    dashboard is also filterable by category/sub_category/store, which
+    only a view with that grain can answer; summing all the way up to just
+    financial_year here still yields correct brand-wide totals."""
     where_sql, where_params = build_where("mv_category_perf", filters)
     extra_where = f"AND {where_sql}" if where_sql else ""
     sql = f"""
@@ -56,15 +85,93 @@ def dashboard_summary(brand_ids: list[int], filters: dict = None) -> dict:
     params = {"brand_ids": brand_ids, **where_params}
     with connection.cursor() as cursor:
         cursor.execute(sql, params)
-        by_year = _dictfetchall(cursor)
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("financial_year") or "Unknown"
+    return rows
 
-    total = {
-        "mrp_value": sum((row["mrp_value"] or 0) for row in by_year),
-        "net_value": sum((row["net_value"] or 0) for row in by_year),
-        "discount_value": sum((row["discount_value"] or 0) for row in by_year),
-        "quantity": sum((row["quantity"] or 0) for row in by_year),
+
+def _dashboard_monthly_breakdown(brand_ids: list[int], filters: dict) -> list[dict]:
+    """A single financial_year's months -- filters already pins the year
+    (build_where turns it into the same WHERE financial_year = ... clause
+    dashboard_filter_options's dropdown relies on), so grouping by
+    month_no/month_name here is a breakdown *within* that year, not
+    across years. Ordered by calendar_year then month_no (not month_no
+    alone) so April..March reads left-to-right, matching the fiscal
+    year's actual month order."""
+    where_sql, where_params = build_where("mv_category_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    sql = f"""
+        SELECT
+            month_name,
+            SUM(mrp_value) AS mrp_value,
+            SUM(net_value) AS net_value,
+            SUM(discount_value) AS discount_value,
+            SUM(quantity) AS quantity
+        FROM mv_category_perf
+        WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+        GROUP BY month_no, month_name
+        ORDER BY MIN(calendar_year), month_no
+    """
+    params = {"brand_ids": brand_ids, **where_params}
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("month_name")
+    return rows
+
+
+def _dashboard_weekly_breakdown(
+    brand_ids: list[int], financial_year: str, month: int, filters: dict
+) -> list[dict]:
+    """A single financial_year + month's weeks. The one deliberate
+    exception to "never scan fact_sales directly" (plan.md Day 7): no
+    materialized view has day-level grain, and adding one at
+    mv_category_perf's full (brand x category x sub_category x gender x
+    store) dimensionality would multiply its row count by ~30 for a
+    feature that only ever reads one brand-month at a time. fact_sales is
+    LIST-partitioned by brand_id and BRIN-indexed on sale_date, so
+    "one brand, one month" prunes to a single partition and a narrow
+    date-range scan within it -- not a scan of the whole table's history.
+
+    Weeks are ISO (Monday-start) via date_trunc, labeled by their
+    chronological position within the month ("Week 1", "Week 2", ...)
+    rather than the raw ISO week-of-year number, which wraps confusingly
+    at year boundaries and means nothing to a store manager."""
+    where_sql, where_params = build_where("fact_sales", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    sql = f"""
+        SELECT
+            date_trunc('week', f.sale_date)::date AS week_start,
+            SUM(f.mrp_value) AS mrp_value,
+            SUM(f.net_value) AS net_value,
+            SUM(f.discount_value) AS discount_value,
+            SUM(f.quantity) AS quantity
+        FROM fact_sales f
+        JOIN dim_calendar c ON c.date_id = f.date_id
+        JOIN dim_product p ON p.product_id = f.product_id
+        JOIN dim_store st ON st.store_id = f.store_id
+        WHERE f.brand_id = ANY(%(brand_ids)s)
+          AND c.financial_year = %(financial_year)s
+          AND c.month_no = %(month_no)s
+          {extra_where}
+        GROUP BY week_start
+        ORDER BY week_start
+    """
+    params = {
+        "brand_ids": brand_ids,
+        "financial_year": financial_year,
+        "month_no": month,
+        **where_params,
     }
-    return {"total": total, "by_year": by_year}
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        rows = _dictfetchall(cursor)
+    for i, row in enumerate(rows):
+        row["label"] = f"Week {i + 1}"
+        del row["week_start"]
+    return rows
 
 
 def dashboard_filter_options(brand_ids: list[int]) -> dict:
