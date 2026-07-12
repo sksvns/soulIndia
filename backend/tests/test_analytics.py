@@ -10,7 +10,13 @@ from apps.analytics.materialized_views import refresh_all
 from apps.ingestion.loader import load_batch
 from apps.ingestion.pipeline import run_pipeline
 from apps.masterdata.models import BrandUploadConfig, DimBrand
-from tests.ingestion_fixtures import KILLER_GOOD_ROWS, KILLER_TREND_ROWS, killer_workbook
+from tests.ingestion_fixtures import (
+    KILLER_GOOD_ROWS,
+    KILLER_TREND_ROWS,
+    PEPE_GOOD_ROWS,
+    killer_workbook,
+    pepe_workbook,
+)
 
 # KILLER_GOOD_ROWS by hand: row1 net=2124.00 mrp=2499.00 disc=375.00 (SS23,
 # 23-24, April); row2 net=2450.00 mrp=3099.00 disc=649.00 (AW22, 23-24,
@@ -56,11 +62,34 @@ def loaded_killer_data(killer_brand_and_config, data_inserter_user):
     return brand
 
 
+@pytest.fixture
+def loaded_killer_and_pepe_data(loaded_killer_data, killer_brand_and_config, data_inserter_user):
+    """Two different brands both loaded, for testing the dashboard's
+    "all brands combined" default (client feedback) -- distinct from
+    every other fixture here, which only ever loads one brand."""
+    from apps.ingestion.models import UploadBatch
+
+    pepe = DimBrand.objects.get(brand_code="PEPE")
+    pepe_config = BrandUploadConfig.objects.get(brand=pepe)
+    batch = UploadBatch.objects.create(
+        brand=pepe,
+        config=pepe_config,
+        uploaded_by=data_inserter_user,
+        file_name="pepe.xlsx",
+        object_key="uploads/pepe/menswear/pepe.xlsx",
+    )
+    result = run_pipeline(pepe, pepe_config, pepe_workbook(PEPE_GOOD_ROWS), "pepe.xlsx")
+    assert result.ok, result.errors
+    load_batch(batch, result.rows)
+    refresh_all()
+    return loaded_killer_data, pepe
+
+
 @pytest.mark.django_db
 def test_dashboard_summary_matches_hand_computed_totals_to_the_paisa(loaded_killer_data):
     brand = loaded_killer_data
 
-    result = queries.dashboard_summary(brand.brand_id)
+    result = queries.dashboard_summary([brand.brand_id])
 
     assert result["total"]["mrp_value"] == EXPECTED_TOTAL_MRP
     assert result["total"]["net_value"] == EXPECTED_TOTAL_NET
@@ -80,13 +109,13 @@ def test_dashboard_summary_matches_hand_computed_totals_to_the_paisa(loaded_kill
 def test_dashboard_summary_filters_by_financial_year_and_month(loaded_killer_data):
     brand = loaded_killer_data
 
-    matching = queries.dashboard_summary(brand.brand_id, {"financial_year": "23-24", "month": 4})
+    matching = queries.dashboard_summary([brand.brand_id], {"financial_year": "23-24", "month": 4})
     assert matching["total"]["net_value"] == EXPECTED_TOTAL_NET
 
-    no_match_fy = queries.dashboard_summary(brand.brand_id, {"financial_year": "24-25"})
+    no_match_fy = queries.dashboard_summary([brand.brand_id], {"financial_year": "24-25"})
     assert no_match_fy["total"]["net_value"] == 0
 
-    no_match_month = queries.dashboard_summary(brand.brand_id, {"month": 5})
+    no_match_month = queries.dashboard_summary([brand.brand_id], {"month": 5})
     assert no_match_month["total"]["net_value"] == 0
 
 
@@ -116,7 +145,7 @@ def test_dashboard_summary_groups_by_financial_year_not_season(loaded_trend_data
     row-by-row numbers this is built from)."""
     brand = loaded_trend_data
 
-    result = queries.dashboard_summary(brand.brand_id)
+    result = queries.dashboard_summary([brand.brand_id])
 
     by_year = {row["financial_year"]: row for row in result["by_year"]}
     assert set(by_year) == {"23-24", "24-25"}
@@ -133,13 +162,13 @@ def test_dashboard_summary_filters_by_category_sub_category_and_store(loaded_tre
     at all (no grain for them); mv_category_perf can."""
     brand = loaded_trend_data
 
-    shirts_only = queries.dashboard_summary(brand.brand_id, {"category": "SHIRTS"})
+    shirts_only = queries.dashboard_summary([brand.brand_id], {"category": "SHIRTS"})
     assert shirts_only["total"]["net_value"] == Decimal("6300.00")  # rows 501,502,504,505
 
-    jeans_only = queries.dashboard_summary(brand.brand_id, {"category": "JEANS"})
+    jeans_only = queries.dashboard_summary([brand.brand_id], {"category": "JEANS"})
     assert jeans_only["total"]["net_value"] == Decimal("1500.00")  # row 503
 
-    one_store = queries.dashboard_summary(brand.brand_id, {"store": "ESIS999"})
+    one_store = queries.dashboard_summary([brand.brand_id], {"store": "ESIS999"})
     assert one_store["total"]["net_value"] == Decimal("500.00")  # row 505 only
 
 
@@ -147,11 +176,52 @@ def test_dashboard_summary_filters_by_category_sub_category_and_store(loaded_tre
 def test_dashboard_filter_options_reflects_real_data_only(loaded_trend_data):
     brand = loaded_trend_data
 
-    options = queries.dashboard_filter_options(brand.brand_id)
+    options = queries.dashboard_filter_options([brand.brand_id])
 
     assert options["financial_years"] == ["23-24", "24-25"]
     assert set(options["categories"]) == {"SHIRTS", "JEANS"}
     assert {s["store_code"] for s in options["stores"]} == {"ESIS170", "ESIS999"}
+
+
+@pytest.mark.django_db
+def test_dashboard_summary_combines_every_brand_when_no_single_brand_requested(
+    loaded_killer_and_pepe_data,
+):
+    """Client feedback: the dashboard's default view is every active
+    brand combined, not one brand you must pick first."""
+    killer, pepe = loaded_killer_and_pepe_data
+
+    killer_only = queries.dashboard_summary([killer.brand_id])
+    pepe_only = queries.dashboard_summary([pepe.brand_id])
+    combined = queries.dashboard_summary([killer.brand_id, pepe.brand_id])
+
+    assert combined["total"]["net_value"] == (
+        killer_only["total"]["net_value"] + pepe_only["total"]["net_value"]
+    )
+    assert combined["total"]["quantity"] == (
+        killer_only["total"]["quantity"] + pepe_only["total"]["quantity"]
+    )
+    # Both brands' years appear in the combined breakdown, not just one.
+    combined_years = {row["financial_year"] for row in combined["by_year"]}
+    assert combined_years >= {row["financial_year"] for row in killer_only["by_year"]}
+    assert combined_years >= {row["financial_year"] for row in pepe_only["by_year"]}
+
+
+@pytest.mark.django_db
+def test_dashboard_filter_options_combines_every_brand_when_no_single_brand_requested(
+    loaded_killer_and_pepe_data,
+):
+    killer, pepe = loaded_killer_and_pepe_data
+
+    killer_only = queries.dashboard_filter_options([killer.brand_id])
+    pepe_only = queries.dashboard_filter_options([pepe.brand_id])
+    combined = queries.dashboard_filter_options([killer.brand_id, pepe.brand_id])
+
+    assert set(combined["categories"]) >= set(killer_only["categories"])
+    assert set(combined["categories"]) >= set(pepe_only["categories"])
+    combined_stores = {s["store_code"] for s in combined["stores"]}
+    assert combined_stores >= {s["store_code"] for s in killer_only["stores"]}
+    assert combined_stores >= {s["store_code"] for s in pepe_only["stores"]}
 
 
 @pytest.mark.django_db

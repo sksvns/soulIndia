@@ -32,7 +32,7 @@ export interface YearBreakdown extends Totals {
 export interface DashboardSummary {
   total: Totals
   by_year: YearBreakdown[]
-  brand_code: string
+  brand_code: string | null
   cache_hit: boolean
   cached_at: string
 }

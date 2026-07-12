@@ -1,4 +1,5 @@
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -31,6 +32,14 @@ MULTI_VALUE_PARAMS = {"store", "discount_range"}
 BRAND_CODE_PARAM = OpenApiParameter(
     "brand_code", str, required=True, description="e.g. KILLER, PEPE"
 )
+# Dashboard-only: brand is optional there (client feedback -- it defaults
+# to every active brand combined), unlike every other analytics endpoint.
+DASHBOARD_BRAND_CODE_PARAM = OpenApiParameter(
+    "brand_code",
+    str,
+    required=False,
+    description="e.g. KILLER, PEPE; omitted means every active brand combined",
+)
 FILTER_PARAMS = [
     BRAND_CODE_PARAM,
     OpenApiParameter("financial_year", str, description="e.g. 23-24"),
@@ -46,6 +55,7 @@ FILTER_PARAMS = [
         "discount_range", str, description="bucket label; comma-separated for multi-select"
     ),
 ]
+DASHBOARD_FILTER_PARAMS = [DASHBOARD_BRAND_CODE_PARAM, *FILTER_PARAMS[1:]]
 ORDER_BY_PARAM = OpenApiParameter(
     "order_by",
     str,
@@ -66,6 +76,20 @@ METRIC_PARAM = OpenApiParameter(
 def _resolve_brand(request) -> DimBrand:
     brand_code = request.query_params.get("brand_code", "")
     return get_object_or_404(DimBrand, brand_code=brand_code.upper(), active=True)
+
+
+def _resolve_dashboard_brand_ids(request) -> tuple[list[int], str | None]:
+    """Dashboard-only: brand_code is optional, defaulting to every active
+    brand combined (client feedback). Returns (brand_ids, brand_code) --
+    brand_code is None when no specific brand was requested, so the
+    response can honestly report "no single brand" rather than an
+    arbitrary one."""
+    brand_code = request.query_params.get("brand_code", "")
+    if not brand_code:
+        brand_ids = list(DimBrand.objects.filter(active=True).values_list("brand_id", flat=True))
+        return brand_ids, None
+    brand = get_object_or_404(DimBrand, brand_code=brand_code.upper(), active=True)
+    return [brand.brand_id], brand.brand_code
 
 
 def _parse_filters(request) -> dict:
@@ -113,39 +137,53 @@ class FilterOptionsView(APIView):
 
 class DashboardSummaryView(APIView):
     """Total/MRP/Net sales + total discount, broken down by financial
-    year."""
+    year. brand_code is optional -- omitted means every active brand
+    combined (client feedback: that's the dashboard's default view, with
+    brand as a filter to narrow down from there, not a precondition)."""
 
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(parameters=[*FILTER_PARAMS, REFRESH_PARAM])
+    @extend_schema(parameters=[*DASHBOARD_FILTER_PARAMS, REFRESH_PARAM])
     def get(self, request):
-        brand = _resolve_brand(request)
+        brand_ids, brand_code = _resolve_dashboard_brand_ids(request)
         filters = _parse_filters(request)
-        data, cache_hit, cached_at = cache.get_or_compute(
-            brand.brand_id,
-            "dashboard_summary",
-            filters,
-            lambda: queries.dashboard_summary(brand.brand_id, filters),
-            force_refresh=_force_refresh(request),
-        )
+        if brand_code:
+            # One specific brand -- the regular cache-aside path.
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "dashboard_summary",
+                filters,
+                lambda: queries.dashboard_summary(brand_ids, filters),
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            # All brands combined: cheap enough (a handful of brands, the
+            # same indexed view every other dashboard query already
+            # hits) to always compute fresh, rather than adding a second
+            # cache-invalidation path that no single brand's upload
+            # would know on its own to bust.
+            data = queries.dashboard_summary(brand_ids, filters)
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
         return Response(
-            {**data, "brand_code": brand.brand_code, "cache_hit": cache_hit, "cached_at": cached_at}
+            {**data, "brand_code": brand_code, "cache_hit": cache_hit, "cached_at": cached_at}
         )
 
 
 class DashboardFilterOptionsView(APIView):
     """Distinct financial years/categories/sub_categories/stores actually
-    present in this brand's data, for populating the Dashboard's own
-    filter dropdowns (a simplified 6-field set -- brand/year/month/
+    present in the relevant data (one brand, or every active brand
+    combined when brand_code is omitted), for populating the Dashboard's
+    own filter dropdowns (a simplified 6-field set -- brand/year/month/
     category/sub_category/store -- per client feedback, separate from the
     full filter bar the other analytics pages still use)."""
 
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(parameters=[BRAND_CODE_PARAM])
+    @extend_schema(parameters=[DASHBOARD_BRAND_CODE_PARAM])
     def get(self, request):
-        brand = _resolve_brand(request)
-        return Response(queries.dashboard_filter_options(brand.brand_id))
+        brand_ids, _ = _resolve_dashboard_brand_ids(request)
+        return Response(queries.dashboard_filter_options(brand_ids))
 
 
 class StorePerfView(APIView):

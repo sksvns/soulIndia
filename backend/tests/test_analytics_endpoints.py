@@ -58,6 +58,25 @@ def test_dashboard_endpoint_returns_correct_totals(loaded_killer_data, data_inse
 
 
 @pytest.mark.django_db
+def test_dashboard_endpoint_omitting_brand_code_combines_every_active_brand(
+    loaded_killer_data, data_inserter_user
+):
+    """Client feedback: the dashboard's default view (no brand_code query
+    param at all) is every active brand combined, not a 400/404 or an
+    arbitrary single brand. With only Killer having data loaded here,
+    "every brand combined" is the same total as Killer alone -- the
+    query-level aggregation-across-multiple-brands math is covered by
+    test_analytics.py's dedicated multi-brand fixture."""
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/dashboard/")
+
+    assert response.status_code == 200
+    assert response.data["total"]["net_value"] == Decimal("3055.00")
+    assert response.data["brand_code"] is None
+
+
+@pytest.mark.django_db
 def test_dashboard_endpoint_second_call_is_a_cache_hit(loaded_killer_data, data_inserter_user):
     client = _authed_client(data_inserter_user)
 

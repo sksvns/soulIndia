@@ -6,7 +6,7 @@ import { useFilters } from '../filters/FilterContext'
 import { CacheStatus } from '../components/CacheStatus'
 import { DashboardFilterBar } from '../components/DashboardFilterBar'
 import { formatINR, formatNumber } from '../utils/format'
-import type { DashboardSummary } from '../types'
+import type { DashboardSummary, Filters } from '../types'
 
 function yearChartOption(summary: DashboardSummary) {
   const years = summary.by_year.map((y) => y.financial_year ?? 'Unknown')
@@ -37,16 +37,37 @@ function yearChartOption(summary: DashboardSummary) {
 }
 
 export function DashboardPage() {
-  const { brand, filters } = useFilters()
+  // Deliberately local, not the shared FilterContext -- brand is optional
+  // here (client feedback: "all brands combined" is the default view),
+  // unlike Stores/Categories/Trends, which always require exactly one.
+  const { brands, brandsLoading } = useFilters()
+  const [brand, setBrand] = useState<string | undefined>(undefined)
+  const [filters, setFilters] = useState<Filters>({})
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const requestId = useRef(0)
 
+  const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
+    setFilters((prev) => {
+      const next = { ...prev }
+      if (value === undefined || value === '') {
+        delete next[key]
+      } else {
+        next[key] = value
+      }
+      return next
+    })
+  }
+
+  const clearAll = () => {
+    setBrand(undefined)
+    setFilters({})
+  }
+
   const load = useCallback(
     (refresh: boolean) => {
-      if (!brand) return
       const id = ++requestId.current
       const setBusy = refresh ? setRefreshing : setLoading
       setBusy(true)
@@ -57,7 +78,7 @@ export function DashboardPage() {
         })
         .catch(() => {
           if (id === requestId.current) {
-            setError('Could not load the dashboard for this brand/filter selection.')
+            setError('Could not load the dashboard for this selection.')
           }
         })
         .finally(() => {
@@ -73,11 +94,17 @@ export function DashboardPage() {
 
   return (
     <>
-      <DashboardFilterBar />
+      <DashboardFilterBar
+        brands={brands}
+        brandsLoading={brandsLoading}
+        brand={brand}
+        onBrandChange={setBrand}
+        filters={filters}
+        onFilterChange={setFilter}
+        onClear={clearAll}
+      />
 
-      {!brand ? (
-        <Empty description="Select a brand to see its dashboard" />
-      ) : error ? (
+      {error ? (
         <Alert type="error" title={error} showIcon />
       ) : (
         <Spin spinning={loading}>
