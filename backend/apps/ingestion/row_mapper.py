@@ -6,6 +6,13 @@ picks the first non-blank candidate *for this row* and applies its cast --
 real per-row fallback, not just a file-level default (verified against the
 real Killer file: NEW EAN CODE is blank on some rows where the legacy EAN
 CODE column still has a value).
+
+A field's column_map entry may also declare `default_if_blank` (e.g.
+net_value/discount_value, client-confirmed: a blank cell means 0, not a
+missing/invalid row) -- when every candidate header is blank for a row,
+the default is cast through the same `cast` a real value would get,
+rather than the field staying None and later failing a required-field
+or NOT NULL check.
 """
 
 from . import coercion
@@ -54,11 +61,19 @@ def build_canonical_row(raw_row: dict, mapped: dict, unmapped: list, column_map:
             if not coercion.is_blank(candidate_value):
                 raw_value = candidate_value
                 break
-        if raw_value is None:
-            canonical[canonical_field] = None
-            continue
 
         spec = column_map[canonical_field]
+        if raw_value is None:
+            # Client-confirmed: a blank discount_value/net_value cell means
+            # 0, not a missing/invalid row -- default_if_blank carries the
+            # raw default through the *same* cast as a real value would
+            # get, rather than a separately hardcoded typed literal here.
+            default = spec.get("default_if_blank")
+            if default is None:
+                canonical[canonical_field] = None
+                continue
+            raw_value = default
+
         caster = coercion.CASTERS.get(spec.get("cast", "str"), coercion.to_str)
         try:
             value = caster(raw_value)

@@ -95,6 +95,27 @@ def test_killer_accepts_scheme_discount_exceeding_mrp_value(killer_brand_and_con
 
 
 @pytest.mark.django_db
+def test_killer_accepts_blank_net_and_discount_value_as_zero(killer_brand_and_config):
+    """Client-confirmed: a blank NET SALE VALUE or DISCOUNT VALUE cell means
+    0, not a missing/invalid row that should be rejected."""
+    brand, config = killer_brand_and_config
+    blank_discount_row = {
+        **KILLER_GOOD_ROWS[0],
+        "BILL NO \nINVOICE NO": 900,
+        "NET \nSALE \nVALUE": None,
+        "DISCOUNT \nVALUE": None,
+    }
+    workbook = killer_workbook([blank_discount_row])
+
+    result = run_pipeline(brand, config, workbook, "killer_blank_discount.xlsx")
+
+    assert result.ok, result.errors
+    row = result.rows[0]
+    assert row["net_value"] == Decimal("0.00")
+    assert row["discount_value"] == Decimal("0.00")
+
+
+@pytest.mark.django_db
 def test_killer_good_file_resolves_and_creates_dimensions(killer_brand_and_config):
     brand, config = killer_brand_and_config
     workbook = killer_workbook(KILLER_GOOD_ROWS)

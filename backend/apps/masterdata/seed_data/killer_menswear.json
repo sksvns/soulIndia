@@ -29,8 +29,8 @@
     "unit_mrp": { "source": ["MRP"], "cast": "decimal", "required": true },
     "quantity": { "source": ["QTY SALE"], "cast": "int", "required": true },
     "mrp_value": { "source": ["MRP SALE VALUE"], "cast": "decimal", "required": true },
-    "net_value": { "source": ["NET SALE VALUE"], "cast": "decimal", "required": true },
-    "discount_value": { "source": ["DISCOUNT VALUE"], "cast": "decimal", "required": true }
+    "net_value": { "source": ["NET SALE VALUE"], "cast": "decimal", "default_if_blank": "0" },
+    "discount_value": { "source": ["DISCOUNT VALUE"], "cast": "decimal", "default_if_blank": "0" }
   },
   "extra_source_columns": [
     "INVOICE DATE",
@@ -45,7 +45,7 @@
   "validation_rules": {
     "required_canonical_fields": [
       "sale_date", "invoice_no", "store_code", "barcode",
-      "unit_mrp", "quantity", "mrp_value", "net_value", "discount_value"
+      "unit_mrp", "quantity", "mrp_value"
     ],
     "is_return_when": "quantity < 0 OR mrp_value < 0 (real data has both return conventions)",
     "discount_pct_tolerance_pct": 2.0,
@@ -55,7 +55,8 @@
       "PARTY NAME (AS PER STORE SIGNAGE) and NAME are near-duplicate store-name columns (differ only in spacing/punctuation) in sampled data; NAME is canonical store_name, the other is preserved in extra for audit.",
       "TYPE is mapped to store_type per the client's column mapping, but is observed constant ('SALE') across the full 748k-row historical file as of Day 0 -- currently non-discriminative; re-verify once a brand/file shows a differing value.",
       "BRAND column is redundant with the (brand, product_line) upload context that selects this config; not treated as authoritative, captured to extra for audit only.",
-      "CLSNG QTY / CLSNG VALUE are Phase 2 (SoH) fields; captured in extra now, not dropped, not used by any Phase 1 view."
+      "CLSNG QTY / CLSNG VALUE are Phase 2 (SoH) fields; captured in extra now, not dropped, not used by any Phase 1 view.",
+      "Client-confirmed 2026-07-18: a blank NET SALE VALUE or DISCOUNT VALUE cell means 0, not a missing/invalid row -- defaulted via default_if_blank rather than rejected as a required-field error. Applies to all brands, not just this one."
     ]
   }
 }
