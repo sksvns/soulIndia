@@ -1,7 +1,12 @@
 import { apiClient } from './client'
 import type {
   AnalyticsResponse,
-  CategoryPerfRow,
+  CategoryChartResponse,
+  CategoryFilterOptions,
+  CategoryRankingResponse,
+  ColorChartResponse,
+  ColorFilterOptions,
+  ColorRankingResponse,
   DashboardFilterOptions,
   DashboardSummary,
   FilterAttribute,
@@ -9,8 +14,14 @@ import type {
   OrderBy,
   PageSize,
   PaginatedAnalyticsResponse,
+  SizeChartResponse,
+  SizeFilterOptions,
+  SizeRankingResponse,
   StoreFilterOptions,
   StorePerfRow,
+  SubcategoryChartResponse,
+  SubcategoryFilterOptions,
+  SubcategoryRankingResponse,
   TrendDimension,
   TrendMetric,
   TrendPoint,
@@ -80,23 +91,186 @@ export async function fetchStoreFilterOptions(
   return data
 }
 
-export async function fetchCategoryPerf(
-  brandCode: string,
+// brandCode is optional here too (client feedback) -- omitted means
+// every active brand combined, same convention as the Dashboard/Stores.
+export async function fetchCategoryRanking(
+  brandCode: string | undefined,
   filters: Filters,
   orderBy: OrderBy,
   refresh = false,
-): Promise<AnalyticsResponse<CategoryPerfRow[]>> {
-  const { data } = await apiClient.get<AnalyticsResponse<CategoryPerfRow[]>>(
-    '/analytics/categories/',
+): Promise<CategoryRankingResponse> {
+  const { data } = await apiClient.get<CategoryRankingResponse>('/analytics/categories/', {
+    params: {
+      brand_code: brandCode,
+      order_by: orderBy,
+      ...filters,
+      refresh: refresh || undefined,
+    },
+  })
+  return data
+}
+
+export async function fetchCategoryFilterOptions(
+  brandCode: string | undefined,
+): Promise<CategoryFilterOptions> {
+  const { data } = await apiClient.get<CategoryFilterOptions>(
+    '/analytics/categories/filter-options/',
+    { params: { brand_code: brandCode } },
+  )
+  return data
+}
+
+export async function fetchCategoryLineChart(
+  brandCode: string | undefined,
+  filters: Filters,
+  categories: string[],
+  refresh = false,
+): Promise<CategoryChartResponse> {
+  const { data } = await apiClient.get<CategoryChartResponse>('/analytics/categories/chart/', {
+    params: {
+      brand_code: brandCode,
+      categories: categories.join(','),
+      ...filters,
+      refresh: refresh || undefined,
+    },
+  })
+  return data
+}
+
+// Subcategory: identical conventions to Category, one level finer.
+export async function fetchSubcategoryRanking(
+  brandCode: string | undefined,
+  filters: Filters,
+  orderBy: OrderBy,
+  refresh = false,
+): Promise<SubcategoryRankingResponse> {
+  const { data } = await apiClient.get<SubcategoryRankingResponse>('/analytics/subcategories/', {
+    params: {
+      brand_code: brandCode,
+      order_by: orderBy,
+      ...filters,
+      refresh: refresh || undefined,
+    },
+  })
+  return data
+}
+
+export async function fetchSubcategoryFilterOptions(
+  brandCode: string | undefined,
+): Promise<SubcategoryFilterOptions> {
+  const { data } = await apiClient.get<SubcategoryFilterOptions>(
+    '/analytics/subcategories/filter-options/',
+    { params: { brand_code: brandCode } },
+  )
+  return data
+}
+
+export async function fetchSubcategoryLineChart(
+  brandCode: string | undefined,
+  filters: Filters,
+  subCategories: string[],
+  refresh = false,
+): Promise<SubcategoryChartResponse> {
+  const { data } = await apiClient.get<SubcategoryChartResponse>(
+    '/analytics/subcategories/chart/',
     {
       params: {
         brand_code: brandCode,
-        order_by: orderBy,
+        sub_categories: subCategories.join(','),
         ...filters,
         refresh: refresh || undefined,
       },
     },
   )
+  return data
+}
+
+// Color: same conventions as Category, plus a Category filter (client
+// feedback: defaults to every category combined, narrow to one).
+export async function fetchColorRanking(
+  brandCode: string | undefined,
+  filters: Filters,
+  orderBy: OrderBy,
+  refresh = false,
+): Promise<ColorRankingResponse> {
+  const { data } = await apiClient.get<ColorRankingResponse>('/analytics/colors/', {
+    params: {
+      brand_code: brandCode,
+      order_by: orderBy,
+      ...filters,
+      refresh: refresh || undefined,
+    },
+  })
+  return data
+}
+
+export async function fetchColorFilterOptions(
+  brandCode: string | undefined,
+): Promise<ColorFilterOptions> {
+  const { data } = await apiClient.get<ColorFilterOptions>('/analytics/colors/filter-options/', {
+    params: { brand_code: brandCode },
+  })
+  return data
+}
+
+export async function fetchColorLineChart(
+  brandCode: string | undefined,
+  filters: Filters,
+  colors: string[],
+  refresh = false,
+): Promise<ColorChartResponse> {
+  const { data } = await apiClient.get<ColorChartResponse>('/analytics/colors/chart/', {
+    params: {
+      brand_code: brandCode,
+      colors: colors.join(','),
+      ...filters,
+      refresh: refresh || undefined,
+    },
+  })
+  return data
+}
+
+// Size: same conventions as Color.
+export async function fetchSizeRanking(
+  brandCode: string | undefined,
+  filters: Filters,
+  orderBy: OrderBy,
+  refresh = false,
+): Promise<SizeRankingResponse> {
+  const { data } = await apiClient.get<SizeRankingResponse>('/analytics/sizes/', {
+    params: {
+      brand_code: brandCode,
+      order_by: orderBy,
+      ...filters,
+      refresh: refresh || undefined,
+    },
+  })
+  return data
+}
+
+export async function fetchSizeFilterOptions(
+  brandCode: string | undefined,
+): Promise<SizeFilterOptions> {
+  const { data } = await apiClient.get<SizeFilterOptions>('/analytics/sizes/filter-options/', {
+    params: { brand_code: brandCode },
+  })
+  return data
+}
+
+export async function fetchSizeLineChart(
+  brandCode: string | undefined,
+  filters: Filters,
+  sizes: string[],
+  refresh = false,
+): Promise<SizeChartResponse> {
+  const { data } = await apiClient.get<SizeChartResponse>('/analytics/sizes/chart/', {
+    params: {
+      brand_code: brandCode,
+      sizes: sizes.join(','),
+      ...filters,
+      refresh: refresh || undefined,
+    },
+  })
   return data
 }
 

@@ -1,18 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Card, Select, Space, Typography, Spin, Empty, Alert } from 'antd'
 import ReactECharts from 'echarts-for-react'
-import { fetchCategoryLineChart, fetchCategoryRanking } from '../api/analytics'
+import { fetchColorLineChart, fetchColorRanking } from '../api/analytics'
 import { useFilters } from '../filters/FilterContext'
 import { CacheStatus } from '../components/CacheStatus'
-import { CategoriesFilterBar } from '../components/CategoriesFilterBar'
+import { ColorsFilterBar } from '../components/ColorsFilterBar'
 import { formatINR, formatNumber } from '../utils/format'
-import type {
-  CategoryChartResponse,
-  CategoryChartRow,
-  CategoryRankingRow,
-  Filters,
-  OrderBy,
-} from '../types'
+import type { ColorChartResponse, ColorChartRow, ColorRankingRow, Filters, OrderBy } from '../types'
 
 const METRIC_OPTIONS: { label: string; value: OrderBy }[] = [
   { label: 'Net Sales', value: 'net' },
@@ -21,7 +15,7 @@ const METRIC_OPTIONS: { label: string; value: OrderBy }[] = [
   { label: 'Discount %', value: 'discount_pct' },
 ]
 
-const METRIC_FIELD: Record<OrderBy, keyof CategoryChartRow> = {
+const METRIC_FIELD: Record<OrderBy, keyof ColorChartRow> = {
   net: 'net_value',
   mrp: 'mrp_value',
   quantity: 'quantity',
@@ -32,36 +26,42 @@ const GRANULARITY_TITLE = { year: 'year', month: 'month', week: 'week' } as cons
 
 const TOP_DEFAULT_COUNT = 5
 
-function chartOption(chart: CategoryChartResponse, metric: OrderBy) {
+function chartOption(chart: ColorChartResponse, metric: OrderBy) {
   const field = METRIC_FIELD[metric]
   const labels = chart.series[0]?.breakdown.map((row) => row.label) ?? []
   const formatValue = (v: number | null) =>
-    v === null ? '—' : metric === 'discount_pct' ? `${v}%` : metric === 'quantity' ? formatNumber(v) : formatINR(v)
+    v === null
+      ? '—'
+      : metric === 'discount_pct'
+        ? `${v}%`
+        : metric === 'quantity'
+          ? formatNumber(v)
+          : formatINR(v)
   return {
     tooltip: { trigger: 'axis', valueFormatter: formatValue },
-    legend: { data: chart.series.map((s) => s.category), top: 0 },
+    legend: { data: chart.series.map((s) => s.color), top: 0 },
     grid: { left: 90, right: 24, bottom: 32, top: 48 },
     xAxis: { type: 'category', data: labels },
     yAxis: { type: 'value', axisLabel: { formatter: formatValue } },
     series: chart.series.map((s) => ({
-      name: s.category,
+      name: s.color,
       type: 'line',
       data: s.breakdown.map((row) => row[field]),
     })),
   }
 }
 
-export function CategoriesPage() {
+export function ColorsPage() {
   const { brands, brandsLoading } = useFilters()
   const [brand, setBrand] = useState<string | undefined>(undefined)
   const [filters, setFilters] = useState<Filters>({})
   const [metric, setMetric] = useState<OrderBy>('net')
 
-  const [ranking, setRanking] = useState<CategoryRankingRow[]>([])
+  const [ranking, setRanking] = useState<ColorRankingRow[]>([])
   const [rankingLoading, setRankingLoading] = useState(false)
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
+  const [selectedColors, setSelectedColors] = useState<string[]>([])
 
-  const [chart, setChart] = useState<CategoryChartResponse | null>(null)
+  const [chart, setChart] = useState<ColorChartResponse | null>(null)
   const [chartLoading, setChartLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -83,21 +83,20 @@ export function CategoriesPage() {
     setFilters({})
   }
 
-  // Re-fetches whenever brand/filters change (not on metric switch, which
-  // only changes what's plotted from data already fetched) and resets the
-  // selection to the new top-5-by-net -- a fresh filter context deserves a
-  // fresh default, same reasoning as the Dashboard's brand-optional reset.
+  // Re-fetches whenever brand/filters (including the Category narrow-
+  // down) change, resetting the selection to the new top-5-by-net --
+  // same reasoning as CategoriesPage's ranking effect.
   useEffect(() => {
     const id = ++rankingRequestId.current
     setRankingLoading(true)
-    fetchCategoryRanking(brand, filters, 'net')
+    fetchColorRanking(brand, filters, 'net')
       .then((data) => {
         if (id !== rankingRequestId.current) return
         setRanking(data.results)
-        setSelectedCategories(data.results.slice(0, TOP_DEFAULT_COUNT).map((r) => r.category))
+        setSelectedColors(data.results.slice(0, TOP_DEFAULT_COUNT).map((r) => r.color))
       })
       .catch(() => {
-        if (id === rankingRequestId.current) setError('Could not load categories for this selection.')
+        if (id === rankingRequestId.current) setError('Could not load colors for this selection.')
       })
       .finally(() => {
         if (id === rankingRequestId.current) setRankingLoading(false)
@@ -106,7 +105,7 @@ export function CategoriesPage() {
 
   const loadChart = useCallback(
     (refresh: boolean) => {
-      if (selectedCategories.length === 0) {
+      if (selectedColors.length === 0) {
         setChart(null)
         return
       }
@@ -114,7 +113,7 @@ export function CategoriesPage() {
       const setBusy = refresh ? setRefreshing : setChartLoading
       setBusy(true)
       setError(null)
-      fetchCategoryLineChart(brand, filters, selectedCategories, refresh)
+      fetchColorLineChart(brand, filters, selectedColors, refresh)
         .then((data) => {
           if (id !== chartRequestId.current) return
           setChart(data)
@@ -126,7 +125,7 @@ export function CategoriesPage() {
           if (id === chartRequestId.current) setBusy(false)
         })
     },
-    [brand, filters, selectedCategories],
+    [brand, filters, selectedColors],
   )
 
   useEffect(() => {
@@ -139,7 +138,7 @@ export function CategoriesPage() {
 
   return (
     <>
-      <CategoriesFilterBar
+      <ColorsFilterBar
         brands={brands}
         brandsLoading={brandsLoading}
         brand={brand}
@@ -152,19 +151,24 @@ export function CategoriesPage() {
         title={chart ? `Sales by ${GRANULARITY_TITLE[chart.granularity]}` : 'Sales by year'}
         extra={
           <Space wrap>
-            <Typography.Text type="secondary">Categories</Typography.Text>
+            <Typography.Text type="secondary">Colors</Typography.Text>
             <Select
               mode="multiple"
               style={{ minWidth: 260 }}
-              placeholder="Select categories"
+              placeholder="Select colors"
               loading={rankingLoading}
-              value={selectedCategories}
-              onChange={setSelectedCategories}
+              value={selectedColors}
+              onChange={setSelectedColors}
               optionFilterProp="label"
-              options={ranking.map((r) => ({ label: r.category, value: r.category }))}
+              options={ranking.map((r) => ({ label: r.color, value: r.color }))}
             />
             <Typography.Text type="secondary">Metric</Typography.Text>
-            <Select style={{ width: 150 }} value={metric} onChange={setMetric} options={METRIC_OPTIONS} />
+            <Select
+              style={{ width: 150 }}
+              value={metric}
+              onChange={setMetric}
+              options={METRIC_OPTIONS}
+            />
             {chart && (
               <CacheStatus
                 cacheHit={chart.cache_hit}
@@ -177,14 +181,10 @@ export function CategoriesPage() {
         }
       >
         <Spin spinning={chartLoading}>
-          {selectedCategories.length === 0 ? (
-            <Empty description="Select at least one category to chart" />
+          {selectedColors.length === 0 ? (
+            <Empty description="Select at least one color to chart" />
           ) : chart && chart.series.length > 0 ? (
-            <ReactECharts
-              option={chartOption(chart, metric)}
-              notMerge
-              style={{ height: 420 }}
-            />
+            <ReactECharts option={chartOption(chart, metric)} notMerge style={{ height: 420 }} />
           ) : (
             <Empty description="No data for this filter selection" />
           )}

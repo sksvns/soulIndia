@@ -63,7 +63,7 @@ def dashboard_summary(brand_ids: list[int], filters: dict = None) -> dict:
 
 
 def _dashboard_yearly_breakdown(brand_ids: list[int], filters: dict) -> list[dict]:
-    """Queries mv_category_perf -- the same view category_perf_top10 uses --
+    """Queries mv_category_perf -- the same view category_ranking uses --
     rather than a coarser (brand x FY x month x season)-only view, since the
     dashboard is also filterable by category/sub_category/store, which
     only a view with that grain can answer; summing all the way up to just
@@ -294,33 +294,1038 @@ def store_filter_options(brand_ids: list[int]) -> dict:
     return {"financial_years": financial_years}
 
 
-def category_perf_top10(brand_id: int, filters: dict = None, order_by: str = "net") -> list[dict]:
+def category_ranking(
+    brand_ids: list[int], filters: dict = None, order_by: str = "net"
+) -> list[dict]:
+    """Every category matching brand_ids/filters, ranked by order_by --
+    never capped at a top-N: this feeds the Categories page's multi-select
+    (every category must be choosable, not just the top few) as well as
+    its top-5-by-net default selection. Categories are naturally a small,
+    bounded set (unlike stores), so no pagination is needed here.
+
+    Grouped by category only, not category+sub_category (client feedback:
+    the Categories page's line chart operates at the top-level category;
+    sub_category is no longer a dimension this page exposes).
+
+    Uses the store-by-name filter engine (dashboard_category_perf), not
+    store-by-code: brand is optional here too (client feedback -- every
+    active brand combined by default, same as the Dashboard), and a
+    store_code is only unique within one brand."""
     order_column = CATEGORY_ORDER_COLUMNS.get(order_by, "net_value")
-    where_sql, where_params = build_where("mv_category_perf", filters)
+    where_sql, where_params = build_where("dashboard_category_perf", filters)
     extra_where = f"AND {where_sql}" if where_sql else ""
     sql = f"""
         WITH agg AS (
             SELECT
-                category, sub_category,
+                category,
                 SUM(mrp_value) AS mrp_value,
                 SUM(net_value) AS net_value,
                 SUM(discount_value) AS discount_value,
                 SUM(quantity) AS quantity
             FROM mv_category_perf
-            WHERE brand_id = %(brand_id)s {extra_where}
-            GROUP BY category, sub_category
+            WHERE brand_id = ANY(%(brand_ids)s) AND category IS NOT NULL {extra_where}
+            GROUP BY category
         )
         SELECT *,
             CASE WHEN mrp_value = 0 THEN NULL
                  ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
         FROM agg
         ORDER BY {order_column} DESC NULLS LAST
-        LIMIT 10
     """
-    params = {"brand_id": brand_id, **where_params}
+    params = {"brand_ids": brand_ids, **where_params}
     with connection.cursor() as cursor:
         cursor.execute(sql, params)
         return _dictfetchall(cursor)
+
+
+def category_filter_options(brand_ids: list[int]) -> dict:
+    """Distinct financial years and store names actually present, for the
+    Categories page's own filter bar (brand/year/month/store -- client
+    feedback, same convention as the Dashboard's). Stores are listed by
+    name, deduped across brands, matching dashboard_filter_options."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT DISTINCT financial_year FROM mv_category_perf "
+            "WHERE brand_id = ANY(%s) ORDER BY financial_year",
+            [brand_ids],
+        )
+        financial_years = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT DISTINCT store_name FROM mv_category_perf "
+            "WHERE brand_id = ANY(%s) AND store_name IS NOT NULL ORDER BY store_name",
+            [brand_ids],
+        )
+        stores = [row[0] for row in cursor.fetchall()]
+
+    return {"financial_years": financial_years, "stores": stores}
+
+
+_ZERO_BREAKDOWN = {
+    "mrp_value": 0,
+    "net_value": 0,
+    "discount_value": 0,
+    "quantity": 0,
+    "discount_pct": None,
+}
+
+
+def category_line_chart(brand_ids: list[int], filters: dict, categories: list[str]) -> dict:
+    """Each requested category's own MRP/Net/Discount/Quantity broken down
+    at whichever granularity the filter selection can chart (client
+    feedback) -- the same year/month/week adaptation dashboard_summary
+    uses, just once per category instead of once for the whole brand.
+
+    Every category's breakdown shares one x-axis, built independently of
+    which categories were requested (so it doesn't shift as the selection
+    changes) and zero-filled for any category with no data in a given
+    period, so multi-line charts stay aligned point-for-point."""
+    if not categories:
+        return {"granularity": "year", "series": []}
+
+    filters = filters or {}
+    financial_year = filters.get("financial_year")
+    month = filters.get("month")
+
+    if financial_year and month:
+        granularity = "week"
+        labels, rows = _category_weekly_breakdown(
+            brand_ids, financial_year, month, filters, categories
+        )
+    elif financial_year:
+        granularity = "month"
+        labels, rows = _category_monthly_breakdown(brand_ids, filters, categories)
+    else:
+        granularity = "year"
+        labels, rows = _category_yearly_breakdown(brand_ids, filters, categories)
+
+    by_category = {cat: {} for cat in categories}
+    for row in rows:
+        by_category[row["category"]][row["label"]] = row
+
+    series = [
+        {
+            "category": cat,
+            "breakdown": [
+                {
+                    "label": label,
+                    **{k: by_category[cat].get(label, _ZERO_BREAKDOWN)[k] for k in _ZERO_BREAKDOWN},
+                }
+                for label in labels
+            ],
+        }
+        for cat in categories
+    ]
+    return {"granularity": granularity, "series": series}
+
+
+def _category_yearly_breakdown(
+    brand_ids: list[int], filters: dict, categories: list[str]
+) -> tuple[list[str], list[dict]]:
+    """canonical labels: every financial_year present brand-wide (not
+    restricted to `categories`), so the x-axis doesn't depend on which
+    categories are selected."""
+    where_sql, where_params = build_where("dashboard_category_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT DISTINCT financial_year FROM mv_category_perf
+            WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+            ORDER BY financial_year NULLS LAST
+            """,
+            {"brand_ids": brand_ids, **where_params},
+        )
+        labels = [row[0] or "Unknown" for row in cursor.fetchall()]
+
+        cat_where_sql, cat_where_params = build_where(
+            "dashboard_category_perf", {**filters, "category": categories}
+        )
+        cat_extra_where = f"AND {cat_where_sql}" if cat_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    category, financial_year,
+                    SUM(mrp_value) AS mrp_value, SUM(net_value) AS net_value,
+                    SUM(discount_value) AS discount_value, SUM(quantity) AS quantity
+                FROM mv_category_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {cat_extra_where}
+                GROUP BY category, financial_year
+            ) agg
+            """,
+            {"brand_ids": brand_ids, **cat_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("financial_year") or "Unknown"
+    return labels, rows
+
+
+def _category_monthly_breakdown(
+    brand_ids: list[int], filters: dict, categories: list[str]
+) -> tuple[list[str], list[dict]]:
+    """A single financial_year's months (filters already pins the year).
+    canonical labels: every month present brand-wide, fiscal-chronological
+    order, independent of which categories are selected."""
+    where_sql, where_params = build_where("dashboard_category_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT month_name FROM (
+                SELECT month_no, month_name, MIN(calendar_year) AS calendar_year
+                FROM mv_category_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+                GROUP BY month_no, month_name
+            ) m
+            ORDER BY calendar_year, month_no
+            """,
+            {"brand_ids": brand_ids, **where_params},
+        )
+        labels = [row[0] for row in cursor.fetchall()]
+
+        cat_where_sql, cat_where_params = build_where(
+            "dashboard_category_perf", {**filters, "category": categories}
+        )
+        cat_extra_where = f"AND {cat_where_sql}" if cat_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    category, month_name,
+                    SUM(mrp_value) AS mrp_value, SUM(net_value) AS net_value,
+                    SUM(discount_value) AS discount_value, SUM(quantity) AS quantity
+                FROM mv_category_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {cat_extra_where}
+                GROUP BY category, month_no, month_name
+            ) agg
+            """,
+            {"brand_ids": brand_ids, **cat_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("month_name")
+    return labels, rows
+
+
+def _category_weekly_breakdown(
+    brand_ids: list[int], financial_year: str, month: int, filters: dict, categories: list[str]
+) -> tuple[list[str], list[dict]]:
+    """A single financial_year + month's weeks, per category. Same
+    fact_sales exception as _dashboard_weekly_breakdown (see its
+    docstring) -- now also grouped by category. canonical labels: every
+    week with brand-wide activity that month, independent of which
+    categories are selected, so a category with a data-free week still
+    gets a "Week N" slot with zero values rather than the line skipping
+    straight past it (which would misalign every line's x-axis)."""
+    where_sql, where_params = build_where("fact_sales", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    base_params = {"brand_ids": brand_ids, "financial_year": financial_year, "month_no": month}
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT DISTINCT date_trunc('week', f.sale_date)::date AS week_start
+            FROM fact_sales f
+            JOIN dim_calendar c ON c.date_id = f.date_id
+            JOIN dim_product p ON p.product_id = f.product_id
+            JOIN dim_store st ON st.store_id = f.store_id
+            WHERE f.brand_id = ANY(%(brand_ids)s)
+              AND c.financial_year = %(financial_year)s
+              AND c.month_no = %(month_no)s
+              {extra_where}
+            ORDER BY week_start
+            """,
+            {**base_params, **where_params},
+        )
+        week_labels = {row[0]: f"Week {i + 1}" for i, row in enumerate(cursor.fetchall())}
+        labels = list(week_labels.values())
+
+        cat_where_sql, cat_where_params = build_where(
+            "fact_sales", {**filters, "category": categories}
+        )
+        cat_extra_where = f"AND {cat_where_sql}" if cat_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    p.category,
+                    date_trunc('week', f.sale_date)::date AS week_start,
+                    SUM(f.mrp_value) AS mrp_value,
+                    SUM(f.net_value) AS net_value,
+                    SUM(f.discount_value) AS discount_value,
+                    SUM(f.quantity) AS quantity
+                FROM fact_sales f
+                JOIN dim_calendar c ON c.date_id = f.date_id
+                JOIN dim_product p ON p.product_id = f.product_id
+                JOIN dim_store st ON st.store_id = f.store_id
+                WHERE f.brand_id = ANY(%(brand_ids)s)
+                  AND c.financial_year = %(financial_year)s
+                  AND c.month_no = %(month_no)s
+                  {cat_extra_where}
+                GROUP BY p.category, week_start
+            ) agg
+            """,
+            {**base_params, **cat_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = week_labels[row.pop("week_start")]
+    return labels, rows
+
+
+def subcategory_ranking(
+    brand_ids: list[int], filters: dict = None, order_by: str = "net"
+) -> list[dict]:
+    """Every sub_category matching brand_ids/filters, ranked by order_by --
+    same shape and conventions as category_ranking (never capped, brand-
+    optional/all-combined, store-by-name), just one level finer (client
+    feedback: a dedicated Subcategory page)."""
+    order_column = CATEGORY_ORDER_COLUMNS.get(order_by, "net_value")
+    where_sql, where_params = build_where("dashboard_category_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    sql = f"""
+        WITH agg AS (
+            SELECT
+                sub_category,
+                SUM(mrp_value) AS mrp_value,
+                SUM(net_value) AS net_value,
+                SUM(discount_value) AS discount_value,
+                SUM(quantity) AS quantity
+            FROM mv_category_perf
+            WHERE brand_id = ANY(%(brand_ids)s) AND sub_category IS NOT NULL {extra_where}
+            GROUP BY sub_category
+        )
+        SELECT *,
+            CASE WHEN mrp_value = 0 THEN NULL
+                 ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+        FROM agg
+        ORDER BY {order_column} DESC NULLS LAST
+    """
+    params = {"brand_ids": brand_ids, **where_params}
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        return _dictfetchall(cursor)
+
+
+def subcategory_filter_options(brand_ids: list[int]) -> dict:
+    """Distinct financial years and store names, same convention as
+    category_filter_options (client feedback: Subcategory keeps the exact
+    same brand/year/month/store filter set as Categories, no extra
+    Category filter)."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT DISTINCT financial_year FROM mv_category_perf "
+            "WHERE brand_id = ANY(%s) ORDER BY financial_year",
+            [brand_ids],
+        )
+        financial_years = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT DISTINCT store_name FROM mv_category_perf "
+            "WHERE brand_id = ANY(%s) AND store_name IS NOT NULL ORDER BY store_name",
+            [brand_ids],
+        )
+        stores = [row[0] for row in cursor.fetchall()]
+
+    return {"financial_years": financial_years, "stores": stores}
+
+
+def subcategory_line_chart(brand_ids: list[int], filters: dict, subcategories: list[str]) -> dict:
+    """Same adaptive year/month/week granularity and zero-fill guarantees
+    as category_line_chart (see its docstring), grouped by sub_category."""
+    if not subcategories:
+        return {"granularity": "year", "series": []}
+
+    filters = filters or {}
+    financial_year = filters.get("financial_year")
+    month = filters.get("month")
+
+    if financial_year and month:
+        granularity = "week"
+        labels, rows = _subcategory_weekly_breakdown(
+            brand_ids, financial_year, month, filters, subcategories
+        )
+    elif financial_year:
+        granularity = "month"
+        labels, rows = _subcategory_monthly_breakdown(brand_ids, filters, subcategories)
+    else:
+        granularity = "year"
+        labels, rows = _subcategory_yearly_breakdown(brand_ids, filters, subcategories)
+
+    by_subcategory = {sc: {} for sc in subcategories}
+    for row in rows:
+        by_subcategory[row["sub_category"]][row["label"]] = row
+
+    series = [
+        {
+            "sub_category": sc,
+            "breakdown": [
+                {
+                    "label": label,
+                    **{
+                        k: by_subcategory[sc].get(label, _ZERO_BREAKDOWN)[k]
+                        for k in _ZERO_BREAKDOWN
+                    },
+                }
+                for label in labels
+            ],
+        }
+        for sc in subcategories
+    ]
+    return {"granularity": granularity, "series": series}
+
+
+def _subcategory_yearly_breakdown(
+    brand_ids: list[int], filters: dict, subcategories: list[str]
+) -> tuple[list[str], list[dict]]:
+    where_sql, where_params = build_where("dashboard_category_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT DISTINCT financial_year FROM mv_category_perf
+            WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+            ORDER BY financial_year NULLS LAST
+            """,
+            {"brand_ids": brand_ids, **where_params},
+        )
+        labels = [row[0] or "Unknown" for row in cursor.fetchall()]
+
+        sub_where_sql, sub_where_params = build_where(
+            "dashboard_category_perf", {**filters, "sub_category": subcategories}
+        )
+        sub_extra_where = f"AND {sub_where_sql}" if sub_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    sub_category, financial_year,
+                    SUM(mrp_value) AS mrp_value, SUM(net_value) AS net_value,
+                    SUM(discount_value) AS discount_value, SUM(quantity) AS quantity
+                FROM mv_category_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {sub_extra_where}
+                GROUP BY sub_category, financial_year
+            ) agg
+            """,
+            {"brand_ids": brand_ids, **sub_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("financial_year") or "Unknown"
+    return labels, rows
+
+
+def _subcategory_monthly_breakdown(
+    brand_ids: list[int], filters: dict, subcategories: list[str]
+) -> tuple[list[str], list[dict]]:
+    where_sql, where_params = build_where("dashboard_category_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT month_name FROM (
+                SELECT month_no, month_name, MIN(calendar_year) AS calendar_year
+                FROM mv_category_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+                GROUP BY month_no, month_name
+            ) m
+            ORDER BY calendar_year, month_no
+            """,
+            {"brand_ids": brand_ids, **where_params},
+        )
+        labels = [row[0] for row in cursor.fetchall()]
+
+        sub_where_sql, sub_where_params = build_where(
+            "dashboard_category_perf", {**filters, "sub_category": subcategories}
+        )
+        sub_extra_where = f"AND {sub_where_sql}" if sub_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    sub_category, month_name,
+                    SUM(mrp_value) AS mrp_value, SUM(net_value) AS net_value,
+                    SUM(discount_value) AS discount_value, SUM(quantity) AS quantity
+                FROM mv_category_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {sub_extra_where}
+                GROUP BY sub_category, month_no, month_name
+            ) agg
+            """,
+            {"brand_ids": brand_ids, **sub_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("month_name")
+    return labels, rows
+
+
+def _subcategory_weekly_breakdown(
+    brand_ids: list[int], financial_year: str, month: int, filters: dict, subcategories: list[str]
+) -> tuple[list[str], list[dict]]:
+    where_sql, where_params = build_where("fact_sales", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    base_params = {"brand_ids": brand_ids, "financial_year": financial_year, "month_no": month}
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT DISTINCT date_trunc('week', f.sale_date)::date AS week_start
+            FROM fact_sales f
+            JOIN dim_calendar c ON c.date_id = f.date_id
+            JOIN dim_product p ON p.product_id = f.product_id
+            JOIN dim_store st ON st.store_id = f.store_id
+            WHERE f.brand_id = ANY(%(brand_ids)s)
+              AND c.financial_year = %(financial_year)s
+              AND c.month_no = %(month_no)s
+              {extra_where}
+            ORDER BY week_start
+            """,
+            {**base_params, **where_params},
+        )
+        week_labels = {row[0]: f"Week {i + 1}" for i, row in enumerate(cursor.fetchall())}
+        labels = list(week_labels.values())
+
+        sub_where_sql, sub_where_params = build_where(
+            "fact_sales", {**filters, "sub_category": subcategories}
+        )
+        sub_extra_where = f"AND {sub_where_sql}" if sub_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    p.sub_category,
+                    date_trunc('week', f.sale_date)::date AS week_start,
+                    SUM(f.mrp_value) AS mrp_value,
+                    SUM(f.net_value) AS net_value,
+                    SUM(f.discount_value) AS discount_value,
+                    SUM(f.quantity) AS quantity
+                FROM fact_sales f
+                JOIN dim_calendar c ON c.date_id = f.date_id
+                JOIN dim_product p ON p.product_id = f.product_id
+                JOIN dim_store st ON st.store_id = f.store_id
+                WHERE f.brand_id = ANY(%(brand_ids)s)
+                  AND c.financial_year = %(financial_year)s
+                  AND c.month_no = %(month_no)s
+                  {sub_extra_where}
+                GROUP BY p.sub_category, week_start
+            ) agg
+            """,
+            {**base_params, **sub_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = week_labels[row.pop("week_start")]
+    return labels, rows
+
+
+def color_ranking(brand_ids: list[int], filters: dict = None, order_by: str = "net") -> list[dict]:
+    """Every color matching brand_ids/filters (optionally narrowed to one
+    category via the Colors page's own Category filter), ranked by
+    order_by -- feeds the multi-select (top 5 by net becomes the
+    default), same conventions as category_ranking."""
+    order_column = CATEGORY_ORDER_COLUMNS.get(order_by, "net_value")
+    where_sql, where_params = build_where("mv_color_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    sql = f"""
+        WITH agg AS (
+            SELECT
+                color,
+                SUM(mrp_value) AS mrp_value,
+                SUM(net_value) AS net_value,
+                SUM(discount_value) AS discount_value,
+                SUM(quantity) AS quantity
+            FROM mv_color_perf
+            WHERE brand_id = ANY(%(brand_ids)s) AND color IS NOT NULL {extra_where}
+            GROUP BY color
+        )
+        SELECT *,
+            CASE WHEN mrp_value = 0 THEN NULL
+                 ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+        FROM agg
+        ORDER BY {order_column} DESC NULLS LAST
+    """
+    params = {"brand_ids": brand_ids, **where_params}
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        return _dictfetchall(cursor)
+
+
+def color_filter_options(brand_ids: list[int]) -> dict:
+    """Distinct financial years/store names/categories, for the Colors
+    page's filter bar (brand/year/month/store, plus a Category filter
+    that defaults to every category combined -- client feedback, same
+    "all, or narrow to one" convention as brand)."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT DISTINCT financial_year FROM mv_color_perf "
+            "WHERE brand_id = ANY(%s) ORDER BY financial_year",
+            [brand_ids],
+        )
+        financial_years = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT DISTINCT store_name FROM mv_color_perf "
+            "WHERE brand_id = ANY(%s) AND store_name IS NOT NULL ORDER BY store_name",
+            [brand_ids],
+        )
+        stores = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT DISTINCT category FROM mv_color_perf "
+            "WHERE brand_id = ANY(%s) AND category IS NOT NULL ORDER BY category",
+            [brand_ids],
+        )
+        categories = [row[0] for row in cursor.fetchall()]
+
+    return {"financial_years": financial_years, "stores": stores, "categories": categories}
+
+
+def color_line_chart(brand_ids: list[int], filters: dict, colors: list[str]) -> dict:
+    """Same adaptive year/month/week granularity and zero-fill guarantees
+    as category_line_chart (see its docstring), grouped by color. filters
+    may include "category" to narrow the whole chart to one category,
+    same as any other filter here."""
+    if not colors:
+        return {"granularity": "year", "series": []}
+
+    filters = filters or {}
+    financial_year = filters.get("financial_year")
+    month = filters.get("month")
+
+    if financial_year and month:
+        granularity = "week"
+        labels, rows = _color_weekly_breakdown(brand_ids, financial_year, month, filters, colors)
+    elif financial_year:
+        granularity = "month"
+        labels, rows = _color_monthly_breakdown(brand_ids, filters, colors)
+    else:
+        granularity = "year"
+        labels, rows = _color_yearly_breakdown(brand_ids, filters, colors)
+
+    by_color = {c: {} for c in colors}
+    for row in rows:
+        by_color[row["color"]][row["label"]] = row
+
+    series = [
+        {
+            "color": c,
+            "breakdown": [
+                {
+                    "label": label,
+                    **{k: by_color[c].get(label, _ZERO_BREAKDOWN)[k] for k in _ZERO_BREAKDOWN},
+                }
+                for label in labels
+            ],
+        }
+        for c in colors
+    ]
+    return {"granularity": granularity, "series": series}
+
+
+def _color_yearly_breakdown(
+    brand_ids: list[int], filters: dict, colors: list[str]
+) -> tuple[list[str], list[dict]]:
+    where_sql, where_params = build_where("mv_color_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT DISTINCT financial_year FROM mv_color_perf
+            WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+            ORDER BY financial_year NULLS LAST
+            """,
+            {"brand_ids": brand_ids, **where_params},
+        )
+        labels = [row[0] or "Unknown" for row in cursor.fetchall()]
+
+        c_where_sql, c_where_params = build_where("mv_color_perf", {**filters, "color": colors})
+        c_extra_where = f"AND {c_where_sql}" if c_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    color, financial_year,
+                    SUM(mrp_value) AS mrp_value, SUM(net_value) AS net_value,
+                    SUM(discount_value) AS discount_value, SUM(quantity) AS quantity
+                FROM mv_color_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {c_extra_where}
+                GROUP BY color, financial_year
+            ) agg
+            """,
+            {"brand_ids": brand_ids, **c_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("financial_year") or "Unknown"
+    return labels, rows
+
+
+def _color_monthly_breakdown(
+    brand_ids: list[int], filters: dict, colors: list[str]
+) -> tuple[list[str], list[dict]]:
+    where_sql, where_params = build_where("mv_color_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT month_name FROM (
+                SELECT month_no, month_name, MIN(calendar_year) AS calendar_year
+                FROM mv_color_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+                GROUP BY month_no, month_name
+            ) m
+            ORDER BY calendar_year, month_no
+            """,
+            {"brand_ids": brand_ids, **where_params},
+        )
+        labels = [row[0] for row in cursor.fetchall()]
+
+        c_where_sql, c_where_params = build_where("mv_color_perf", {**filters, "color": colors})
+        c_extra_where = f"AND {c_where_sql}" if c_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    color, month_name,
+                    SUM(mrp_value) AS mrp_value, SUM(net_value) AS net_value,
+                    SUM(discount_value) AS discount_value, SUM(quantity) AS quantity
+                FROM mv_color_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {c_extra_where}
+                GROUP BY color, month_no, month_name
+            ) agg
+            """,
+            {"brand_ids": brand_ids, **c_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("month_name")
+    return labels, rows
+
+
+def _color_weekly_breakdown(
+    brand_ids: list[int], financial_year: str, month: int, filters: dict, colors: list[str]
+) -> tuple[list[str], list[dict]]:
+    where_sql, where_params = build_where("fact_sales", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    base_params = {"brand_ids": brand_ids, "financial_year": financial_year, "month_no": month}
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT DISTINCT date_trunc('week', f.sale_date)::date AS week_start
+            FROM fact_sales f
+            JOIN dim_calendar c ON c.date_id = f.date_id
+            JOIN dim_product p ON p.product_id = f.product_id
+            JOIN dim_store st ON st.store_id = f.store_id
+            WHERE f.brand_id = ANY(%(brand_ids)s)
+              AND c.financial_year = %(financial_year)s
+              AND c.month_no = %(month_no)s
+              {extra_where}
+            ORDER BY week_start
+            """,
+            {**base_params, **where_params},
+        )
+        week_labels = {row[0]: f"Week {i + 1}" for i, row in enumerate(cursor.fetchall())}
+        labels = list(week_labels.values())
+
+        c_where_sql, c_where_params = build_where("fact_sales", {**filters, "color": colors})
+        c_extra_where = f"AND {c_where_sql}" if c_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    p.color,
+                    date_trunc('week', f.sale_date)::date AS week_start,
+                    SUM(f.mrp_value) AS mrp_value,
+                    SUM(f.net_value) AS net_value,
+                    SUM(f.discount_value) AS discount_value,
+                    SUM(f.quantity) AS quantity
+                FROM fact_sales f
+                JOIN dim_calendar c ON c.date_id = f.date_id
+                JOIN dim_product p ON p.product_id = f.product_id
+                JOIN dim_store st ON st.store_id = f.store_id
+                WHERE f.brand_id = ANY(%(brand_ids)s)
+                  AND c.financial_year = %(financial_year)s
+                  AND c.month_no = %(month_no)s
+                  {c_extra_where}
+                GROUP BY p.color, week_start
+            ) agg
+            """,
+            {**base_params, **c_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = week_labels[row.pop("week_start")]
+    return labels, rows
+
+
+def size_ranking(brand_ids: list[int], filters: dict = None, order_by: str = "net") -> list[dict]:
+    """Every size matching brand_ids/filters (optionally narrowed to one
+    category), ranked by order_by -- same conventions as color_ranking."""
+    order_column = CATEGORY_ORDER_COLUMNS.get(order_by, "net_value")
+    where_sql, where_params = build_where("mv_size_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    sql = f"""
+        WITH agg AS (
+            SELECT
+                size,
+                SUM(mrp_value) AS mrp_value,
+                SUM(net_value) AS net_value,
+                SUM(discount_value) AS discount_value,
+                SUM(quantity) AS quantity
+            FROM mv_size_perf
+            WHERE brand_id = ANY(%(brand_ids)s) AND size IS NOT NULL {extra_where}
+            GROUP BY size
+        )
+        SELECT *,
+            CASE WHEN mrp_value = 0 THEN NULL
+                 ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+        FROM agg
+        ORDER BY {order_column} DESC NULLS LAST
+    """
+    params = {"brand_ids": brand_ids, **where_params}
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        return _dictfetchall(cursor)
+
+
+def size_filter_options(brand_ids: list[int]) -> dict:
+    """Distinct financial years/store names/categories, for the Sizes
+    page's filter bar -- same convention as color_filter_options."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT DISTINCT financial_year FROM mv_size_perf "
+            "WHERE brand_id = ANY(%s) ORDER BY financial_year",
+            [brand_ids],
+        )
+        financial_years = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT DISTINCT store_name FROM mv_size_perf "
+            "WHERE brand_id = ANY(%s) AND store_name IS NOT NULL ORDER BY store_name",
+            [brand_ids],
+        )
+        stores = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT DISTINCT category FROM mv_size_perf "
+            "WHERE brand_id = ANY(%s) AND category IS NOT NULL ORDER BY category",
+            [brand_ids],
+        )
+        categories = [row[0] for row in cursor.fetchall()]
+
+    return {"financial_years": financial_years, "stores": stores, "categories": categories}
+
+
+def size_line_chart(brand_ids: list[int], filters: dict, sizes: list[str]) -> dict:
+    """Same adaptive year/month/week granularity and zero-fill guarantees
+    as color_line_chart, grouped by size."""
+    if not sizes:
+        return {"granularity": "year", "series": []}
+
+    filters = filters or {}
+    financial_year = filters.get("financial_year")
+    month = filters.get("month")
+
+    if financial_year and month:
+        granularity = "week"
+        labels, rows = _size_weekly_breakdown(brand_ids, financial_year, month, filters, sizes)
+    elif financial_year:
+        granularity = "month"
+        labels, rows = _size_monthly_breakdown(brand_ids, filters, sizes)
+    else:
+        granularity = "year"
+        labels, rows = _size_yearly_breakdown(brand_ids, filters, sizes)
+
+    by_size = {sz: {} for sz in sizes}
+    for row in rows:
+        by_size[row["size"]][row["label"]] = row
+
+    series = [
+        {
+            "size": sz,
+            "breakdown": [
+                {
+                    "label": label,
+                    **{k: by_size[sz].get(label, _ZERO_BREAKDOWN)[k] for k in _ZERO_BREAKDOWN},
+                }
+                for label in labels
+            ],
+        }
+        for sz in sizes
+    ]
+    return {"granularity": granularity, "series": series}
+
+
+def _size_yearly_breakdown(
+    brand_ids: list[int], filters: dict, sizes: list[str]
+) -> tuple[list[str], list[dict]]:
+    where_sql, where_params = build_where("mv_size_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT DISTINCT financial_year FROM mv_size_perf
+            WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+            ORDER BY financial_year NULLS LAST
+            """,
+            {"brand_ids": brand_ids, **where_params},
+        )
+        labels = [row[0] or "Unknown" for row in cursor.fetchall()]
+
+        s_where_sql, s_where_params = build_where("mv_size_perf", {**filters, "size": sizes})
+        s_extra_where = f"AND {s_where_sql}" if s_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    size, financial_year,
+                    SUM(mrp_value) AS mrp_value, SUM(net_value) AS net_value,
+                    SUM(discount_value) AS discount_value, SUM(quantity) AS quantity
+                FROM mv_size_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {s_extra_where}
+                GROUP BY size, financial_year
+            ) agg
+            """,
+            {"brand_ids": brand_ids, **s_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("financial_year") or "Unknown"
+    return labels, rows
+
+
+def _size_monthly_breakdown(
+    brand_ids: list[int], filters: dict, sizes: list[str]
+) -> tuple[list[str], list[dict]]:
+    where_sql, where_params = build_where("mv_size_perf", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT month_name FROM (
+                SELECT month_no, month_name, MIN(calendar_year) AS calendar_year
+                FROM mv_size_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {extra_where}
+                GROUP BY month_no, month_name
+            ) m
+            ORDER BY calendar_year, month_no
+            """,
+            {"brand_ids": brand_ids, **where_params},
+        )
+        labels = [row[0] for row in cursor.fetchall()]
+
+        s_where_sql, s_where_params = build_where("mv_size_perf", {**filters, "size": sizes})
+        s_extra_where = f"AND {s_where_sql}" if s_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    size, month_name,
+                    SUM(mrp_value) AS mrp_value, SUM(net_value) AS net_value,
+                    SUM(discount_value) AS discount_value, SUM(quantity) AS quantity
+                FROM mv_size_perf
+                WHERE brand_id = ANY(%(brand_ids)s) {s_extra_where}
+                GROUP BY size, month_no, month_name
+            ) agg
+            """,
+            {"brand_ids": brand_ids, **s_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = row.pop("month_name")
+    return labels, rows
+
+
+def _size_weekly_breakdown(
+    brand_ids: list[int], financial_year: str, month: int, filters: dict, sizes: list[str]
+) -> tuple[list[str], list[dict]]:
+    where_sql, where_params = build_where("fact_sales", filters)
+    extra_where = f"AND {where_sql}" if where_sql else ""
+    base_params = {"brand_ids": brand_ids, "financial_year": financial_year, "month_no": month}
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT DISTINCT date_trunc('week', f.sale_date)::date AS week_start
+            FROM fact_sales f
+            JOIN dim_calendar c ON c.date_id = f.date_id
+            JOIN dim_product p ON p.product_id = f.product_id
+            JOIN dim_store st ON st.store_id = f.store_id
+            WHERE f.brand_id = ANY(%(brand_ids)s)
+              AND c.financial_year = %(financial_year)s
+              AND c.month_no = %(month_no)s
+              {extra_where}
+            ORDER BY week_start
+            """,
+            {**base_params, **where_params},
+        )
+        week_labels = {row[0]: f"Week {i + 1}" for i, row in enumerate(cursor.fetchall())}
+        labels = list(week_labels.values())
+
+        s_where_sql, s_where_params = build_where("fact_sales", {**filters, "size": sizes})
+        s_extra_where = f"AND {s_where_sql}" if s_where_sql else ""
+        cursor.execute(
+            f"""
+            SELECT *,
+                CASE WHEN mrp_value = 0 THEN NULL
+                     ELSE ROUND(100 * (1 - net_value / mrp_value), 2) END AS discount_pct
+            FROM (
+                SELECT
+                    p.size,
+                    date_trunc('week', f.sale_date)::date AS week_start,
+                    SUM(f.mrp_value) AS mrp_value,
+                    SUM(f.net_value) AS net_value,
+                    SUM(f.discount_value) AS discount_value,
+                    SUM(f.quantity) AS quantity
+                FROM fact_sales f
+                JOIN dim_calendar c ON c.date_id = f.date_id
+                JOIN dim_product p ON p.product_id = f.product_id
+                JOIN dim_store st ON st.store_id = f.store_id
+                WHERE f.brand_id = ANY(%(brand_ids)s)
+                  AND c.financial_year = %(financial_year)s
+                  AND c.month_no = %(month_no)s
+                  {s_extra_where}
+                GROUP BY p.size, week_start
+            ) agg
+            """,
+            {**base_params, **s_where_params},
+        )
+        rows = _dictfetchall(cursor)
+    for row in rows:
+        row["label"] = week_labels[row.pop("week_start")]
+    return labels, rows
 
 
 def _trend(mv_name: str, brand_id: int, dimension: str, metric: str, filters: dict) -> list[dict]:

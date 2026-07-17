@@ -16,11 +16,9 @@ no-op for that one filter.
 to brand_id before reaching the filter engine (apps.analytics.views), never
 optional like the rest of these.
 
-Deliberately unsupported for now: color, fit, size, article_code -- see
-migration 0002's docstring for why (cardinality; no current view needs
-them). They remain valid attribute_registry entries -- adding a column for
-them to the right MV, plus one more entry here, is the only change needed
-to make them filterable, not a query rewrite.
+color/size are now supported too (mv_color_perf/mv_size_perf, migration
+0005) -- fit/article_code remain deliberately unsupported for the same
+cardinality reasons migration 0002 originally gave for all four.
 """
 
 MV_COLUMNS = {
@@ -65,19 +63,41 @@ MV_COLUMNS = {
         "season": "season_code",
         "discount_range": "discount_bucket",
     },
+    # Purpose-built for the Color/Size pages (migration 0005) -- brand-
+    # optional/all-combined from day one, so store filters by name here
+    # too, same reasoning as dashboard_category_perf. category is a
+    # regular filter (not the view's own grouping dimension), letting the
+    # Color/Size pages narrow to one category the same way brand narrows
+    # from "all brands" (client feedback).
+    "mv_color_perf": {
+        "store": "store_name",
+        "category": "category",
+        "color": "color",
+        "financial_year": "financial_year",
+        "month": "month_no",
+    },
+    "mv_size_perf": {
+        "store": "store_name",
+        "category": "category",
+        "size": "size",
+        "financial_year": "financial_year",
+        "month": "month_no",
+    },
     # Not a materialized view -- the one deliberate exception (see
     # queries._dashboard_weekly_breakdown's docstring). financial_year/month
     # aren't listed here because that query pins those via dim_calendar
     # directly rather than through this generic filter engine; this entry
     # only covers the filters that can still narrow a single brand-month
-    # further (category/sub_category/store), joined in from dim_product/
-    # dim_store. store filters by name for the same reason as
+    # further (category/sub_category/color/size/store), joined in from
+    # dim_product/dim_store. store filters by name for the same reason as
     # dashboard_category_perf above.
     "fact_sales": {
         "store": "st.store_name",
         "category": "p.category",
         "sub_category": "p.sub_category",
         "gender": "p.gender",
+        "color": "p.color",
+        "size": "p.size",
     },
 }
 
