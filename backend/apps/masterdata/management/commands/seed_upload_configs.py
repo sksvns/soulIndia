@@ -6,7 +6,12 @@ from django.core.management.base import BaseCommand, CommandError
 from apps.masterdata.models import BrandUploadConfig, DimBrand
 
 SEED_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "seed_data"
-CONFIG_FILES = ["killer_menswear.json", "pepe_menswear.json", "junior_killer_kids.json"]
+CONFIG_FILES = [
+    "killer_menswear.json",
+    "pepe_menswear.json",
+    "junior_killer_kids.json",
+    "kraus_womenswear.json",
+]
 
 
 class Command(BaseCommand):

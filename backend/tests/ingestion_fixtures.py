@@ -610,3 +610,133 @@ JUNIOR_KILLER_BAD_ROWS = [
         "NEW DATE": "not-a-date",
     },
 ]
+
+
+# Real column vocabulary/values from the actual Kraus sample file (Kraus
+# Sales.xlsx, 63 rows, single store "The Bombay Fashion" / location "02")
+# -- no shared vocabulary with Killer/Pepe/Junior Killer's files at all,
+# so this brand's config was built from scratch, not a client mapping
+# document. Note the date is a real calendar-date string ("21-Jun-2026"),
+# not an Excel serial number -- to_excel_date already handles this via
+# its pandas fallback. No sheet_name is configured for Kraus (the real
+# file's one sheet is unnamed "Sheet1"), so single-sheet fixtures here
+# don't need build_workbook's sheet_name param either.
+KRAUS_HEADERS = [
+    "Retailer",
+    "Transaction Type",
+    "Supplier Name",
+    "Transaction Location Id",
+    "Transaction Date",
+    "Transaction No",
+    "Brand Name",
+    "Article No",
+    "Size Name",
+    "Style Name",
+    "Eoss Scheme Name",
+    "Item Code w/o Batch",
+    "Total Discount Pct",
+    "Bill Discount Amt",
+    "Item Discount Amt",
+    "Total Discount Amt",
+    "Transaction Quantity",
+    "Transaction Value at MRP",
+    "Transaction Value with GST",
+]
+
+KRAUS_GOOD_ROWS = [
+    {
+        "Retailer": "The Bombay Fashion",
+        "Transaction Type": "Retail Sales",
+        "Supplier Name": "SOUL INDIA (PEPE)",
+        "Transaction Location Id": "02",
+        "Transaction Date": date(2026, 6, 21),
+        "Transaction No": "0202-0015279   ",
+        "Brand Name": "KRAUS",
+        "Article No": "L TOP",
+        "Size Name": "26 / S",
+        "Style Name": "LTA-2338",
+        "Eoss Scheme Name": None,
+        "Item Code w/o Batch": "8905747590116",
+        "Total Discount Pct": 10.00,
+        "Bill Discount Amt": 0,
+        "Item Discount Amt": 159.9,
+        "Total Discount Amt": 159.9,
+        "Transaction Quantity": 1,
+        "Transaction Value at MRP": 1599,
+        "Transaction Value with GST": 1439.09,
+    },
+    {
+        "Retailer": "The Bombay Fashion",
+        "Transaction Type": "Retail Sales",
+        "Supplier Name": "SOUL INDIA (PEPE)",
+        "Transaction Location Id": "02",
+        "Transaction Date": date(2026, 6, 22),
+        "Transaction No": "0202-0015506   ",
+        "Brand Name": "KRAUS",
+        "Article No": "L CARGO PANT",
+        "Size Name": "28 / M",
+        "Style Name": "LFA-2277",
+        "Eoss Scheme Name": "B1-30,B2-40,KRAUS",
+        "Item Code w/o Batch": "8905747583361",
+        "Total Discount Pct": 0.00,
+        "Bill Discount Amt": 0,
+        "Item Discount Amt": 0,
+        "Total Discount Amt": 0,
+        "Transaction Quantity": 1,
+        "Transaction Value at MRP": 2295,
+        "Transaction Value with GST": 2294.99,
+    },
+    {
+        # Real return row shape: quantity and mrp_value/net_value all
+        # negative, invoice_no carries an "R" infix.
+        "Retailer": "The Bombay Fashion",
+        "Transaction Type": "Retail Sales",
+        "Supplier Name": "SOUL INDIA (PEPE)",
+        "Transaction Location Id": "02",
+        "Transaction Date": date(2026, 6, 24),
+        "Transaction No": "0202R-000625   ",
+        "Brand Name": "KRAUS",
+        "Article No": "L TOP",
+        "Size Name": "24 / XS",
+        "Style Name": "LTA-2338",
+        "Eoss Scheme Name": None,
+        "Item Code w/o Batch": "8905747590109",
+        "Total Discount Pct": 0.00,
+        "Bill Discount Amt": 0,
+        "Item Discount Amt": 0,
+        "Total Discount Amt": 0,
+        "Transaction Quantity": -1,
+        "Transaction Value at MRP": -1599,
+        "Transaction Value with GST": -1599,
+    },
+]
+
+KRAUS_BAD_ROWS = [
+    {
+        **KRAUS_GOOD_ROWS[0],
+        "Transaction No": "0202-0099001   ",
+        "Item Code w/o Batch": None,  # required field missing
+    },
+    {
+        **KRAUS_GOOD_ROWS[0],
+        "Transaction No": "0202-0099002   ",
+        "Transaction Quantity": 0,  # zero-quantity / GWP-style row
+    },
+    {
+        **KRAUS_GOOD_ROWS[0],
+        "Transaction No": "0202-0099003   ",
+        "Transaction Quantity": -1,
+        "Transaction Value with GST": -1439.09,
+        # Transaction Value at MRP stays +1599 (inherited): negative qty +
+        # positive mrp_value has no legitimate real-data match.
+    },
+    {
+        **KRAUS_GOOD_ROWS[0],
+        "Transaction No": "0202-0099004   ",
+        "Transaction Date": "not-a-date",
+    },
+]
+
+
+def kraus_workbook(rows):
+    return build_workbook(KRAUS_HEADERS, rows)

@@ -42,9 +42,10 @@ def test_seed_brands_creates_killer_and_pepe_idempotently():
     call_command("seed_brands", stdout=StringIO())
     call_command("seed_brands", stdout=StringIO())
 
-    assert DimBrand.objects.count() == 3
+    assert DimBrand.objects.count() == 4
     assert set(DimBrand.objects.values_list("brand_code", flat=True)) == {
         "KILLER",
         "PEPE",
         "JUNIOR_KILLER",
+        "KRAUS",
     }

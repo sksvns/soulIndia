@@ -213,6 +213,54 @@ upload path**, as the first real load of this brand's history: 38,545 of
 real files, confirming it's a genuine cross-brand client-side export habit,
 not a bug specific to one file.
 
+## Kraus (womenswear) — 19 source columns, all accounted for
+
+date_source = `Transaction Date`. Source: `Kraus Sales.xlsx`, a single
+unnamed sheet (`Sheet1`), 63 sample rows, one store ("The Bombay Fashion" /
+location `02`) -- confirmed 2026-07-18. Unlike Killer/Pepe/Junior Killer,
+this file shares **no column vocabulary at all** with the other three
+brands' exports; the mapping below was built from scratch by inspecting the
+actual sample file, not a client-supplied mapping document. No `sheet_name`
+is configured in `validation_rules` (unlike the other three) -- the real
+file's one sheet is unnamed, so the pipeline's default (sheet index 0)
+already does the right thing.
+
+| # | Source column | Canonical target |
+|---|---|---|
+| 1 | Retailer | `store_name` |
+| 2 | Transaction Type | `extra` (`"Retail Sales"` in every sampled row; no other value observed yet) |
+| 3 | Supplier Name | `extra` (redundant with upload context, `"SOUL INDIA (PEPE)"` in every sampled row) |
+| 4 | Transaction Location Id | `store_code` |
+| 5 | Transaction Date | `sale_date` (real calendar-date string, e.g. `"21-Jun-2026"` -- not an Excel serial number; `to_excel_date`'s pandas fallback already handles this) |
+| 6 | Transaction No | `invoice_no` |
+| 7 | Brand Name | `extra` (redundant with upload context, always `"KRAUS"`) |
+| 8 | Article No | `category` (only 4 distinct values in the sample -- L TOP/L TROUSER/L DENIM/L CARGO PANT, clearly a garment type despite the column's name, not a per-SKU code; client-confirmed 2026-07-18) |
+| 9 | Size Name | `size` (combined format, e.g. `"26 / S"`, occasionally `"S / W-86CM"` with no consistent delimiter/order -- stored as-is, not split) |
+| 10 | Style Name | `article_code` (the real per-SKU code, e.g. `LTA-2338`) |
+| 11 | Eoss Scheme Name | `extra` (a promo-scheme label, e.g. `"B1-30,B2-40,KRAUS"` -- not an actual fashion season; client-confirmed 2026-07-18 not to map it to `season`) |
+| 12 | Item Code w/o Batch | `barcode` |
+| 13 | Total Discount Pct | `supplied_discount_pct` (validate-only; already a plain percentage like Killer/Junior Killer, unlike Pepe's WAD fraction) |
+| 14 | Bill Discount Amt | `extra` (audit; always 0 in the sample) |
+| 15 | Item Discount Amt | `extra` (audit) |
+| 16 | Total Discount Amt | `discount_value` (bill+item combined; identical to Item Discount Amt in the sample since Bill is always 0, but Total is the field actually documented as the combined figure) |
+| 17 | Transaction Quantity | `quantity` |
+| 18 | Transaction Value at MRP | `mrp_value` |
+| 19 | Transaction Value with GST | `net_value` |
+
+**No `sub_category`-equivalent column at all** -- left unmapped, same
+handling as any brand that doesn't supply an optional dimension.
+
+**`unit_mrp` has no source column** -- derived as `mrp_value / quantity`
+(`apps/ingestion/derivations.py::unit_mrp_from_mrp_and_quantity`), the one
+other derived field besides Pepe's `financial_year`. `abs()` keeps the
+per-unit price positive on return rows even though `mrp_value`/`quantity`
+are both negative there.
+
+This is a small (63-row), single-store sample, not a multi-month/multi-store
+historical export like the other three brands' original samples -- the
+mapping above (especially the return-row sign convention and the `unit_mrp`
+derivation) should be re-verified once a larger real file is available.
+
 ## Day 2 implementation notes
 
 Two small, deliberate refinements surfaced while actually building the
