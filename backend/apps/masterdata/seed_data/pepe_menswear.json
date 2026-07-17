@@ -25,8 +25,8 @@
     "unit_mrp": { "source": ["MRP"], "cast": "decimal", "required": true },
     "quantity": { "source": ["UNITS"], "cast": "int", "required": true },
     "mrp_value": { "source": ["TOTAL MRP"], "cast": "decimal", "required": true },
-    "net_value": { "source": ["NET SALE PRICE"], "cast": "decimal", "required": true },
-    "discount_value": { "source": ["ACTUAL DISC"], "cast": "decimal", "required": true },
+    "net_value": { "source": ["NET SALE PRICE"], "cast": "decimal", "default_if_blank": "0" },
+    "discount_value": { "source": ["ACTUAL DISC"], "cast": "decimal", "default_if_blank": "0" },
     "supplied_discount_pct": { "source": ["WAD"], "cast": "fraction_to_percent", "validate_only": true }
   },
   "financial_year": {
@@ -48,7 +48,7 @@
   "validation_rules": {
     "required_canonical_fields": [
       "sale_date", "invoice_no", "store_code", "barcode",
-      "unit_mrp", "quantity", "mrp_value", "net_value", "discount_value"
+      "unit_mrp", "quantity", "mrp_value"
     ],
     "is_return_when": "quantity < 0 OR mrp_value < 0 (real data has both return conventions)",
     "discount_pct_tolerance_pct": 2.0,
@@ -58,7 +58,8 @@
       "BillNo is mixed-type in the real file (mostly text like 'PRHO26-79718', occasionally a bare number like 6045); always cast to string, never numeric.",
       "STOCKNo (barcode) and Total MRP/Net Sale Price/Actual Disc are stored as floats in the source .xlsb; barcode must be cast via int() before str() to avoid scientific notation or trailing '.0'.",
       "Sample sanity check (must hold in tests): MRP 2999, Net 1799 -> discount_value 1200, computed discount_pct 40% (matches supplied WAD).",
-      "Confirmed in real data: a single Pepe upload can span multiple months (the real DSR extract spans Jan-Apr 2026 in one file) -- slice detection must group by (store, month) actually present in the parsed data, never assume one file = one month."
+      "Confirmed in real data: a single Pepe upload can span multiple months (the real DSR extract spans Jan-Apr 2026 in one file) -- slice detection must group by (store, month) actually present in the parsed data, never assume one file = one month.",
+      "Client-confirmed 2026-07-18: a blank NET SALE PRICE or ACTUAL DISC cell means 0, not a missing/invalid row -- defaulted via default_if_blank rather than rejected as a required-field error. Applies to all brands, not just this one."
     ]
   }
 }

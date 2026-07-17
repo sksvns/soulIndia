@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from apps.ingestion.row_mapper import build_canonical_row
 
 COLUMN_MAP = {
@@ -8,6 +10,8 @@ COLUMN_MAP = {
     "season": {"source": ["SEASON"], "cast": "str", "trusted_as_supplied": True},
     "unit_mrp": {"source": ["MRP"], "cast": "decimal"},
     "quantity": {"source": ["QTY SALE"], "cast": "int"},
+    "net_value": {"source": ["NET SALE VALUE"], "cast": "decimal", "default_if_blank": "0"},
+    "discount_value": {"source": ["DISCOUNT VALUE"], "cast": "decimal", "default_if_blank": "0"},
 }
 
 
@@ -84,3 +88,31 @@ def test_build_canonical_row_skips_blank_unmapped_values_in_extra():
     canonical, extra, errors = build_canonical_row(raw_row, mapped, ["EMPTY COLUMN"], COLUMN_MAP)
 
     assert extra == {}
+
+
+def test_build_canonical_row_defaults_blank_net_and_discount_value_to_zero():
+    """Client-confirmed: a blank NET SALE VALUE/DISCOUNT VALUE cell means 0,
+    not a missing/invalid row -- must come back as a real Decimal("0"),
+    not None (net_value/discount_value are NOT NULL columns)."""
+    raw_row = {"NET SALE VALUE": None, "DISCOUNT VALUE": None, "STORE CODE": "ESIS170"}
+    mapped = {
+        "net_value": ["NET SALE VALUE"],
+        "discount_value": ["DISCOUNT VALUE"],
+        "store_code": ["STORE CODE"],
+    }
+
+    canonical, extra, errors = build_canonical_row(raw_row, mapped, [], COLUMN_MAP)
+
+    assert canonical["net_value"] == Decimal("0")
+    assert canonical["discount_value"] == Decimal("0")
+    assert errors == {}
+
+
+def test_build_canonical_row_real_value_wins_over_default_if_blank():
+    raw_row = {"NET SALE VALUE": 1234.5, "DISCOUNT VALUE": None}
+    mapped = {"net_value": ["NET SALE VALUE"], "discount_value": ["DISCOUNT VALUE"]}
+
+    canonical, extra, errors = build_canonical_row(raw_row, mapped, [], COLUMN_MAP)
+
+    assert canonical["net_value"] == Decimal("1234.5")
+    assert canonical["discount_value"] == Decimal("0")
