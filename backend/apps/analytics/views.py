@@ -304,29 +304,378 @@ class StoreFilterOptionsView(APIView):
 
 
 class CategoryPerfView(APIView):
-    """Top-10 category/sub_category, optional store multi-select."""
+    """Every category matching the filters, ranked by net/mrp/quantity/
+    discount_pct (client feedback: no longer capped at a top-10 -- every
+    category must be choosable on the Categories page's multi-select).
+    brand_code is optional -- omitted means every active brand combined,
+    same convention as the Dashboard/Stores."""
 
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(parameters=[*FILTER_PARAMS, ORDER_BY_PARAM, REFRESH_PARAM])
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, ORDER_BY_PARAM, REFRESH_PARAM])
     def get(self, request):
-        brand = _resolve_brand(request)
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
         filters = _parse_filters(request)
         order_by = request.query_params.get("order_by", "net")
-        data, cache_hit, cached_at = cache.get_or_compute(
-            brand.brand_id,
-            "category_perf_top10",
-            {**filters, "order_by": order_by},
-            lambda: queries.category_perf_top10(brand.brand_id, filters, order_by),
-            force_refresh=_force_refresh(request),
-        )
+        cache_filters = {**filters, "order_by": order_by}
+
+        def compute():
+            return queries.category_ranking(brand_ids, filters, order_by)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "category_ranking",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
         return Response(
             {
                 "results": data,
-                "brand_code": brand.brand_code,
+                "brand_code": brand_code,
                 "cache_hit": cache_hit,
                 "cached_at": cached_at,
             }
+        )
+
+
+class CategoryFilterOptionsView(APIView):
+    """Distinct financial years/store names actually present (one brand,
+    or every active brand combined when brand_code is omitted), for the
+    Categories page's own filter bar (client feedback: brand/year/month/
+    store, same convention as the Dashboard's)."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[OPTIONAL_BRAND_CODE_PARAM])
+    def get(self, request):
+        brand_ids, _ = _resolve_optional_brand_ids(request)
+        return Response(queries.category_filter_options(brand_ids))
+
+
+CATEGORIES_PARAM = OpenApiParameter(
+    "categories", str, description="comma-separated category names to chart", required=True
+)
+
+
+class CategoryLineChartView(APIView):
+    """Each requested category's own MRP/Net/Discount/Quantity broken
+    down at a granularity that adapts to the filter selection -- year by
+    default, month once a single year is picked, week once that year is
+    narrowed to a single month too (client feedback, same as the
+    Dashboard). brand_code is optional -- omitted means every active
+    brand combined."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, CATEGORIES_PARAM, REFRESH_PARAM])
+    def get(self, request):
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
+        filters = _parse_filters(request)
+        categories_param = request.query_params.get("categories", "")
+        categories = [c for c in categories_param.split(",") if c]
+        cache_filters = {**filters, "categories": categories}
+
+        def compute():
+            return queries.category_line_chart(brand_ids, filters, categories)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "category_line_chart",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
+        return Response(
+            {**data, "brand_code": brand_code, "cache_hit": cache_hit, "cached_at": cached_at}
+        )
+
+
+class SubcategoryPerfView(APIView):
+    """Every sub_category matching the filters, ranked by net/mrp/
+    quantity/discount_pct -- same conventions as CategoryPerfView, one
+    level finer (client feedback: a dedicated Subcategory page, exactly
+    the same brand/year/month/store filter set, no extra Category
+    filter)."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, ORDER_BY_PARAM, REFRESH_PARAM])
+    def get(self, request):
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
+        filters = _parse_filters(request)
+        order_by = request.query_params.get("order_by", "net")
+        cache_filters = {**filters, "order_by": order_by}
+
+        def compute():
+            return queries.subcategory_ranking(brand_ids, filters, order_by)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "subcategory_ranking",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
+        return Response(
+            {
+                "results": data,
+                "brand_code": brand_code,
+                "cache_hit": cache_hit,
+                "cached_at": cached_at,
+            }
+        )
+
+
+class SubcategoryFilterOptionsView(APIView):
+    """Distinct financial years/store names for the Subcategory page's
+    filter bar -- same convention as CategoryFilterOptionsView."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[OPTIONAL_BRAND_CODE_PARAM])
+    def get(self, request):
+        brand_ids, _ = _resolve_optional_brand_ids(request)
+        return Response(queries.subcategory_filter_options(brand_ids))
+
+
+SUBCATEGORIES_PARAM = OpenApiParameter(
+    "sub_categories", str, description="comma-separated sub_category names to chart", required=True
+)
+
+
+class SubcategoryLineChartView(APIView):
+    """Each requested sub_category's own MRP/Net/Discount/Quantity broken
+    down at a granularity that adapts to the filter selection -- same as
+    CategoryLineChartView."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, SUBCATEGORIES_PARAM, REFRESH_PARAM])
+    def get(self, request):
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
+        filters = _parse_filters(request)
+        subcategories_param = request.query_params.get("sub_categories", "")
+        subcategories = [c for c in subcategories_param.split(",") if c]
+        cache_filters = {**filters, "sub_categories": subcategories}
+
+        def compute():
+            return queries.subcategory_line_chart(brand_ids, filters, subcategories)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "subcategory_line_chart",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
+        return Response(
+            {**data, "brand_code": brand_code, "cache_hit": cache_hit, "cached_at": cached_at}
+        )
+
+
+class ColorPerfView(APIView):
+    """Every color matching the filters, ranked by net/mrp/quantity/
+    discount_pct -- same conventions as CategoryPerfView. filters may
+    include "category" to narrow from every category combined to just
+    one (client feedback: same "all, or narrow to one" pattern as
+    brand)."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, ORDER_BY_PARAM, REFRESH_PARAM])
+    def get(self, request):
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
+        filters = _parse_filters(request)
+        order_by = request.query_params.get("order_by", "net")
+        cache_filters = {**filters, "order_by": order_by}
+
+        def compute():
+            return queries.color_ranking(brand_ids, filters, order_by)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "color_ranking",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
+        return Response(
+            {
+                "results": data,
+                "brand_code": brand_code,
+                "cache_hit": cache_hit,
+                "cached_at": cached_at,
+            }
+        )
+
+
+class ColorFilterOptionsView(APIView):
+    """Distinct financial years/store names/categories for the Colors
+    page's filter bar (brand/year/month/store + Category) -- same
+    convention as CategoryFilterOptionsView, plus the category list."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[OPTIONAL_BRAND_CODE_PARAM])
+    def get(self, request):
+        brand_ids, _ = _resolve_optional_brand_ids(request)
+        return Response(queries.color_filter_options(brand_ids))
+
+
+COLORS_PARAM = OpenApiParameter(
+    "colors", str, description="comma-separated color names to chart", required=True
+)
+
+
+class ColorLineChartView(APIView):
+    """Each requested color's own MRP/Net/Discount/Quantity broken down
+    at a granularity that adapts to the filter selection -- same as
+    CategoryLineChartView. filters may include "category" to narrow the
+    whole chart to one category."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, COLORS_PARAM, REFRESH_PARAM])
+    def get(self, request):
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
+        filters = _parse_filters(request)
+        colors_param = request.query_params.get("colors", "")
+        colors = [c for c in colors_param.split(",") if c]
+        cache_filters = {**filters, "colors": colors}
+
+        def compute():
+            return queries.color_line_chart(brand_ids, filters, colors)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "color_line_chart",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
+        return Response(
+            {**data, "brand_code": brand_code, "cache_hit": cache_hit, "cached_at": cached_at}
+        )
+
+
+class SizePerfView(APIView):
+    """Every size matching the filters, ranked by net/mrp/quantity/
+    discount_pct -- same conventions as ColorPerfView."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, ORDER_BY_PARAM, REFRESH_PARAM])
+    def get(self, request):
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
+        filters = _parse_filters(request)
+        order_by = request.query_params.get("order_by", "net")
+        cache_filters = {**filters, "order_by": order_by}
+
+        def compute():
+            return queries.size_ranking(brand_ids, filters, order_by)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "size_ranking",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
+        return Response(
+            {
+                "results": data,
+                "brand_code": brand_code,
+                "cache_hit": cache_hit,
+                "cached_at": cached_at,
+            }
+        )
+
+
+class SizeFilterOptionsView(APIView):
+    """Distinct financial years/store names/categories for the Sizes
+    page's filter bar -- same convention as ColorFilterOptionsView."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[OPTIONAL_BRAND_CODE_PARAM])
+    def get(self, request):
+        brand_ids, _ = _resolve_optional_brand_ids(request)
+        return Response(queries.size_filter_options(brand_ids))
+
+
+SIZES_PARAM = OpenApiParameter(
+    "sizes", str, description="comma-separated size names to chart", required=True
+)
+
+
+class SizeLineChartView(APIView):
+    """Each requested size's own MRP/Net/Discount/Quantity broken down at
+    a granularity that adapts to the filter selection -- same as
+    ColorLineChartView."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, SIZES_PARAM, REFRESH_PARAM])
+    def get(self, request):
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
+        filters = _parse_filters(request)
+        sizes_param = request.query_params.get("sizes", "")
+        sizes = [c for c in sizes_param.split(",") if c]
+        cache_filters = {**filters, "sizes": sizes}
+
+        def compute():
+            return queries.size_line_chart(brand_ids, filters, sizes)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "size_line_chart",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
+        return Response(
+            {**data, "brand_code": brand_code, "cache_hit": cache_hit, "cached_at": cached_at}
         )
 
 

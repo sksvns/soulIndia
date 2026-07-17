@@ -123,14 +123,164 @@ export interface StorePerfRow {
   discount_pct: number | null
 }
 
-export interface CategoryPerfRow {
-  category: string | null
-  sub_category: string | null
-  mrp_value: number
-  net_value: number
-  discount_value: number
-  quantity: number
+// Every category (client feedback: never capped at a top-N, grouped by
+// top-level category only -- sub_category isn't a dimension the
+// Categories page exposes anymore). Feeds both the ranking display and
+// the line chart's multi-select (top 5 by net becomes the default).
+export interface CategoryRankingRow extends Totals {
+  category: string
   discount_pct: number | null
+}
+
+export interface CategoryRankingResponse {
+  results: CategoryRankingRow[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
+// Distinct financial years/store names actually present, for the
+// Categories page's own filter bar (brand/year/month/store -- client
+// feedback, same convention as the Dashboard's).
+export interface CategoryFilterOptions {
+  financial_years: string[]
+  stores: string[]
+}
+
+export interface CategoryChartRow extends Totals {
+  label: string
+  discount_pct: number | null
+}
+
+export interface CategorySeries {
+  category: string
+  breakdown: CategoryChartRow[]
+}
+
+// One line per selected category, granularity-adaptive x-axis (same
+// year/month/week logic as the Dashboard) shared across every line --
+// zero-filled per category so multi-line charts stay aligned point for
+// point (see queries.category_line_chart).
+export interface CategoryChartResponse {
+  granularity: DashboardGranularity
+  series: CategorySeries[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
+// Subcategory: identical shape and conventions to Category, one level
+// finer -- exactly the same brand/year/month/store filter set, no extra
+// Category filter (client feedback).
+export interface SubcategoryRankingRow extends Totals {
+  sub_category: string
+  discount_pct: number | null
+}
+
+export interface SubcategoryRankingResponse {
+  results: SubcategoryRankingRow[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
+export interface SubcategoryFilterOptions {
+  financial_years: string[]
+  stores: string[]
+}
+
+export interface SubcategoryChartRow extends Totals {
+  label: string
+  discount_pct: number | null
+}
+
+export interface SubcategorySeries {
+  sub_category: string
+  breakdown: SubcategoryChartRow[]
+}
+
+export interface SubcategoryChartResponse {
+  granularity: DashboardGranularity
+  series: SubcategorySeries[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
+// Color: same shape/conventions as Category, but its filter bar also has
+// a Category filter (defaults to every category combined, narrow to one
+// -- client feedback, same "all, or narrow to one" pattern as brand).
+export interface ColorRankingRow extends Totals {
+  color: string
+  discount_pct: number | null
+}
+
+export interface ColorRankingResponse {
+  results: ColorRankingRow[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
+export interface ColorFilterOptions {
+  financial_years: string[]
+  stores: string[]
+  categories: string[]
+}
+
+export interface ColorChartRow extends Totals {
+  label: string
+  discount_pct: number | null
+}
+
+export interface ColorSeries {
+  color: string
+  breakdown: ColorChartRow[]
+}
+
+export interface ColorChartResponse {
+  granularity: DashboardGranularity
+  series: ColorSeries[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
+// Size: same shape/conventions as Color.
+export interface SizeRankingRow extends Totals {
+  size: string
+  discount_pct: number | null
+}
+
+export interface SizeRankingResponse {
+  results: SizeRankingRow[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
+export interface SizeFilterOptions {
+  financial_years: string[]
+  stores: string[]
+  categories: string[]
+}
+
+export interface SizeChartRow extends Totals {
+  label: string
+  discount_pct: number | null
+}
+
+export interface SizeSeries {
+  size: string
+  breakdown: SizeChartRow[]
+}
+
+export interface SizeChartResponse {
+  granularity: DashboardGranularity
+  series: SizeSeries[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
 }
 
 export interface UploadConfig {

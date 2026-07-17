@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from io import StringIO
 
@@ -460,18 +461,348 @@ def test_store_filter_options_reflects_real_data_only(loaded_trend_data):
 
 
 @pytest.mark.django_db
-def test_category_perf_top10_reflects_2_level_hierarchy_and_store_filter(loaded_killer_data):
+def test_category_ranking_reflects_every_category_and_store_filter(loaded_killer_data):
+    """category_ranking groups by category only (client feedback: the
+    Categories page's line chart is top-level-category only), is never
+    capped at a top-N, and filters store by name -- not code -- since
+    brand is optional here too (same convention as the Dashboard)."""
     brand = loaded_killer_data
 
-    results = queries.category_perf_top10(brand.brand_id, order_by="net")
+    results = queries.category_ranking([brand.brand_id], order_by="net")
     categories = {row["category"] for row in results}
     assert categories == {"SHIRTS", "JEANS"}
 
-    filtered = queries.category_perf_top10(brand.brand_id, {"store": ["ESIS170"]})
+    filtered = queries.category_ranking(
+        [brand.brand_id], {"store": ["AADARSH ENTERPRISES - DUMRAO"]}
+    )
     assert len(filtered) == 2  # SHIRTS and JEANS, same store
 
-    no_match = queries.category_perf_top10(brand.brand_id, {"store": ["NOSUCHSTORE"]})
+    no_match = queries.category_ranking([brand.brand_id], {"store": ["NOSUCHSTORE"]})
     assert no_match == []
+
+
+@pytest.mark.django_db
+def test_category_filter_options_reflects_real_data_only(loaded_trend_data):
+    brand = loaded_trend_data
+
+    options = queries.category_filter_options([brand.brand_id])
+
+    assert options["financial_years"] == ["23-24", "24-25"]
+    assert options["stores"] == ["AADARSH ENTERPRISES - DUMRAO", "SILVER SQUARE - PATNA"]
+
+
+@pytest.mark.django_db
+def test_category_line_chart_switches_granularity_same_as_dashboard(loaded_trend_data):
+    """Same year/month/week adaptation as dashboard_summary, just once per
+    requested category. Also proves zero-fill: JEANS has no FY24-25 data
+    at all, but still gets a 0-valued slot there rather than a shorter
+    breakdown array that would misalign the two lines' x-axes."""
+    brand = loaded_trend_data
+
+    result = queries.category_line_chart([brand.brand_id], {}, ["SHIRTS", "JEANS"])
+
+    assert result["granularity"] == "year"
+    by_category = {
+        s["category"]: {row["label"]: row for row in s["breakdown"]} for s in result["series"]
+    }
+    assert set(by_category) == {"SHIRTS", "JEANS"}
+    assert list(by_category["SHIRTS"]) == ["23-24", "24-25"]
+    assert by_category["SHIRTS"]["23-24"]["net_value"] == Decimal("3300.00")  # rows 501+502+505
+    assert by_category["SHIRTS"]["24-25"]["net_value"] == Decimal("3000.00")  # row 504
+    assert by_category["JEANS"]["23-24"]["net_value"] == Decimal("1500.00")  # row 503
+    assert by_category["JEANS"]["24-25"]["net_value"] == 0  # zero-filled, JEANS has no 24-25 rows
+    assert by_category["JEANS"]["24-25"]["discount_pct"] is None
+
+
+@pytest.mark.django_db
+def test_category_line_chart_monthly_when_only_year_selected(loaded_trend_data):
+    brand = loaded_trend_data
+
+    result = queries.category_line_chart(
+        [brand.brand_id], {"financial_year": "23-24"}, ["SHIRTS", "JEANS"]
+    )
+
+    assert result["granularity"] == "month"
+    by_category = {
+        s["category"]: {row["label"]: row for row in s["breakdown"]} for s in result["series"]
+    }
+    assert list(by_category["SHIRTS"]) == ["April", "July", "October"]  # canonical, fiscal order
+    assert by_category["SHIRTS"]["April"]["net_value"] == Decimal("1500.00")  # rows 501+505
+    assert by_category["SHIRTS"]["July"]["net_value"] == Decimal("1800.00")  # row 502
+    assert by_category["SHIRTS"]["October"]["net_value"] == 0  # zero-filled
+    assert by_category["JEANS"]["October"]["net_value"] == Decimal("1500.00")  # row 503
+    assert by_category["JEANS"]["April"]["net_value"] == 0  # zero-filled
+
+
+@pytest.mark.django_db
+def test_category_line_chart_weekly_when_year_and_month_selected(loaded_killer_data):
+    """KILLER_GOOD_ROWS' 3 rows land in 3 different ISO weeks of April
+    2023 -- Apr 5 (SHIRTS), Apr 15 (SHIRTS return), Apr 26 (JEANS) -- so
+    this also proves per-category zero-fill at week grain."""
+    brand = loaded_killer_data
+
+    result = queries.category_line_chart(
+        [brand.brand_id], {"financial_year": "23-24", "month": 4}, ["SHIRTS", "JEANS"]
+    )
+
+    assert result["granularity"] == "week"
+    by_category = {
+        s["category"]: {row["label"]: row for row in s["breakdown"]} for s in result["series"]
+    }
+    assert list(by_category["SHIRTS"]) == ["Week 1", "Week 2", "Week 3"]
+    assert by_category["SHIRTS"]["Week 1"]["net_value"] == Decimal("2124.00")  # Apr 5
+    assert by_category["SHIRTS"]["Week 2"]["net_value"] == Decimal("-1519.00")  # Apr 15 return
+    assert by_category["SHIRTS"]["Week 3"]["net_value"] == 0  # zero-filled, JEANS' week
+    assert by_category["JEANS"]["Week 3"]["net_value"] == Decimal("2450.00")  # Apr 26
+    assert by_category["JEANS"]["Week 1"]["net_value"] == 0  # zero-filled
+
+
+@pytest.mark.django_db
+def test_category_line_chart_empty_categories_returns_empty_series(loaded_killer_data):
+    brand = loaded_killer_data
+
+    result = queries.category_line_chart([brand.brand_id], {}, [])
+
+    assert result["series"] == []
+
+
+@pytest.mark.django_db
+def test_subcategory_ranking_reflects_every_subcategory_and_store_filter(loaded_killer_data):
+    """Killer's column_map maps sub_category from the same source data
+    category/sub_category coincidentally share in these fixtures, but
+    this still exercises subcategory_ranking's own grouping/SQL path
+    independently of category_ranking's."""
+    brand = loaded_killer_data
+
+    results = queries.subcategory_ranking([brand.brand_id], order_by="net")
+    subcategories = {row["sub_category"] for row in results}
+    assert subcategories == {"SHIRTS", "JEANS"}
+
+    filtered = queries.subcategory_ranking(
+        [brand.brand_id], {"store": ["AADARSH ENTERPRISES - DUMRAO"]}
+    )
+    assert len(filtered) == 2
+
+    no_match = queries.subcategory_ranking([brand.brand_id], {"store": ["NOSUCHSTORE"]})
+    assert no_match == []
+
+
+@pytest.mark.django_db
+def test_subcategory_filter_options_reflects_real_data_only(loaded_trend_data):
+    brand = loaded_trend_data
+
+    options = queries.subcategory_filter_options([brand.brand_id])
+
+    assert options["financial_years"] == ["23-24", "24-25"]
+    assert options["stores"] == ["AADARSH ENTERPRISES - DUMRAO", "SILVER SQUARE - PATNA"]
+
+
+@pytest.mark.django_db
+def test_subcategory_line_chart_switches_granularity_with_zero_fill(loaded_trend_data):
+    brand = loaded_trend_data
+
+    result = queries.subcategory_line_chart([brand.brand_id], {}, ["SHIRTS", "JEANS"])
+
+    assert result["granularity"] == "year"
+    by_subcategory = {
+        s["sub_category"]: {row["label"]: row for row in s["breakdown"]} for s in result["series"]
+    }
+    assert by_subcategory["SHIRTS"]["23-24"]["net_value"] == Decimal("3300.00")
+    assert by_subcategory["JEANS"]["24-25"]["net_value"] == 0  # zero-filled
+
+
+@pytest.fixture
+def loaded_color_trend_data(killer_brand_and_config, data_inserter_user):
+    """Two colors with different financial-year coverage -- neither
+    KILLER_GOOD_ROWS nor KILLER_TREND_ROWS vary color/size at all (every
+    row inherits PINK/L from its base row), so this is a dedicated
+    fixture for color/size line-chart granularity + zero-fill testing,
+    mirroring loaded_trend_data's category shape but on SHADE/SIZE."""
+    from apps.ingestion.models import UploadBatch
+
+    brand, config = killer_brand_and_config
+    rows = [
+        {
+            **KILLER_GOOD_ROWS[0],
+            "BILL NO \nINVOICE NO": 701,
+            "NEW DATE": date(2023, 4, 5),
+            "MONTH": "APRIL",
+            "F. YEAR": "23-24",
+            "SHADE": "RED",
+            "SIZE": "M",
+            "MRP": 1000,
+            "QTY \nSALE": 1,
+            "NET \nSALE \nVALUE": 1000,
+            "DISCOUNT \nVALUE": 0,
+            "MRP \nSALE \nVALUE": 1000,
+        },
+        {
+            **KILLER_GOOD_ROWS[0],
+            "BILL NO \nINVOICE NO": 702,
+            "NEW DATE": date(2023, 7, 10),
+            "MONTH": "JULY",
+            "F. YEAR": "23-24",
+            "SHADE": "RED",
+            "SIZE": "M",
+            "MRP": 2000,
+            "QTY \nSALE": 1,
+            "NET \nSALE \nVALUE": 1800,
+            "DISCOUNT \nVALUE": 200,
+            "MRP \nSALE \nVALUE": 2000,
+        },
+        {
+            **KILLER_GOOD_ROWS[0],
+            "BILL NO \nINVOICE NO": 703,
+            "NEW DATE": date(2023, 10, 15),
+            "MONTH": "OCTOBER",
+            "F. YEAR": "23-24",
+            # Distinct barcode: dim_product resolves color/size/category
+            # once per barcode, first-row-wins (dimension_resolver.py) --
+            # reusing the base row's barcode here would silently keep
+            # RED/M for this row too.
+            "NEW EAN CODE": 9999999999901,
+            "SHADE": "BLUE",
+            "SIZE": "L",
+            "MRP": 750,
+            "QTY \nSALE": 2,
+            "NET \nSALE \nVALUE": 1500,
+            "DISCOUNT \nVALUE": 0,
+            "MRP \nSALE \nVALUE": 1500,
+        },
+        {
+            **KILLER_GOOD_ROWS[0],
+            "BILL NO \nINVOICE NO": 704,
+            "NEW DATE": date(2024, 4, 20),
+            "MONTH": "APRIL",
+            "F. YEAR": "24-25",
+            "SHADE": "RED",
+            "SIZE": "M",
+            "MRP": 3000,
+            "QTY \nSALE": 1,
+            "NET \nSALE \nVALUE": 3000,
+            "DISCOUNT \nVALUE": 0,
+            "MRP \nSALE \nVALUE": 3000,
+        },
+    ]
+    batch = UploadBatch.objects.create(
+        brand=brand,
+        config=config,
+        uploaded_by=data_inserter_user,
+        file_name="color_trend.xlsx",
+        object_key="uploads/killer/menswear/color_trend.xlsx",
+    )
+    result = run_pipeline(brand, config, killer_workbook(rows), "color_trend.xlsx")
+    assert result.ok, result.errors
+    load_batch(batch, result.rows)
+    refresh_all()
+    return brand
+
+
+@pytest.mark.django_db
+def test_color_ranking_reflects_every_color_and_category_filter(loaded_color_trend_data):
+    brand = loaded_color_trend_data
+
+    results = queries.color_ranking([brand.brand_id], order_by="net")
+    colors = {row["color"] for row in results}
+    assert colors == {"RED", "BLUE"}
+
+    # All rows here are SHIRTS (base row's MAIN CATEGORY, never overridden).
+    filtered = queries.color_ranking([brand.brand_id], {"category": "SHIRTS"})
+    assert {row["color"] for row in filtered} == {"RED", "BLUE"}
+
+    no_match = queries.color_ranking([brand.brand_id], {"category": "NOSUCHCATEGORY"})
+    assert no_match == []
+
+
+@pytest.mark.django_db
+def test_color_filter_options_reflects_real_data_only(loaded_color_trend_data):
+    brand = loaded_color_trend_data
+
+    options = queries.color_filter_options([brand.brand_id])
+
+    assert options["financial_years"] == ["23-24", "24-25"]
+    assert options["categories"] == ["SHIRTS"]
+    assert options["stores"] == ["AADARSH ENTERPRISES - DUMRAO"]
+
+
+@pytest.mark.django_db
+def test_color_line_chart_switches_granularity_with_zero_fill(loaded_color_trend_data):
+    brand = loaded_color_trend_data
+
+    result = queries.color_line_chart([brand.brand_id], {}, ["RED", "BLUE"])
+
+    assert result["granularity"] == "year"
+    by_color = {s["color"]: {row["label"]: row for row in s["breakdown"]} for s in result["series"]}
+    assert list(by_color["RED"]) == ["23-24", "24-25"]
+    assert by_color["RED"]["23-24"]["net_value"] == Decimal("2800.00")  # 1000 + 1800
+    assert by_color["RED"]["24-25"]["net_value"] == Decimal("3000.00")
+    assert by_color["BLUE"]["23-24"]["net_value"] == Decimal("1500.00")
+    assert by_color["BLUE"]["24-25"]["net_value"] == 0  # zero-filled
+    assert by_color["BLUE"]["24-25"]["discount_pct"] is None
+
+
+@pytest.mark.django_db
+def test_color_line_chart_monthly_when_only_year_selected(loaded_color_trend_data):
+    brand = loaded_color_trend_data
+
+    result = queries.color_line_chart(
+        [brand.brand_id], {"financial_year": "23-24"}, ["RED", "BLUE"]
+    )
+
+    assert result["granularity"] == "month"
+    by_color = {s["color"]: {row["label"]: row for row in s["breakdown"]} for s in result["series"]}
+    assert list(by_color["RED"]) == ["April", "July", "October"]
+    assert by_color["RED"]["April"]["net_value"] == Decimal("1000.00")
+    assert by_color["RED"]["October"]["net_value"] == 0  # zero-filled
+    assert by_color["BLUE"]["October"]["net_value"] == Decimal("1500.00")
+
+
+@pytest.mark.django_db
+def test_color_line_chart_weekly_when_year_and_month_selected(loaded_color_trend_data):
+    brand = loaded_color_trend_data
+
+    result = queries.color_line_chart(
+        [brand.brand_id], {"financial_year": "23-24", "month": 4}, ["RED"]
+    )
+
+    assert result["granularity"] == "week"
+    labels = [row["label"] for row in result["series"][0]["breakdown"]]
+    assert labels == ["Week 1"]
+    assert result["series"][0]["breakdown"][0]["net_value"] == Decimal("1000.00")
+
+
+@pytest.mark.django_db
+def test_size_ranking_reflects_every_size_and_category_filter(loaded_color_trend_data):
+    brand = loaded_color_trend_data
+
+    results = queries.size_ranking([brand.brand_id], order_by="net")
+    sizes = {row["size"] for row in results}
+    assert sizes == {"M", "L"}
+
+    filtered = queries.size_ranking([brand.brand_id], {"category": "SHIRTS"})
+    assert {row["size"] for row in filtered} == {"M", "L"}
+
+
+@pytest.mark.django_db
+def test_size_filter_options_reflects_real_data_only(loaded_color_trend_data):
+    brand = loaded_color_trend_data
+
+    options = queries.size_filter_options([brand.brand_id])
+
+    assert options["financial_years"] == ["23-24", "24-25"]
+    assert options["categories"] == ["SHIRTS"]
+
+
+@pytest.mark.django_db
+def test_size_line_chart_switches_granularity_with_zero_fill(loaded_color_trend_data):
+    brand = loaded_color_trend_data
+
+    result = queries.size_line_chart([brand.brand_id], {}, ["M", "L"])
+
+    assert result["granularity"] == "year"
+    by_size = {s["size"]: {row["label"]: row for row in s["breakdown"]} for s in result["series"]}
+    assert by_size["M"]["23-24"]["net_value"] == Decimal("2800.00")
+    assert by_size["L"]["24-25"]["net_value"] == 0  # zero-filled
 
 
 @pytest.mark.django_db

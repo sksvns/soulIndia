@@ -188,7 +188,7 @@ def test_stores_filter_options_endpoint_returns_real_distinct_values(
 
 
 @pytest.mark.django_db
-def test_categories_endpoint_returns_top10(loaded_killer_data, data_inserter_user):
+def test_categories_endpoint_returns_every_category_ranked(loaded_killer_data, data_inserter_user):
     client = _authed_client(data_inserter_user)
 
     response = client.get("/api/analytics/categories/", {"brand_code": "KILLER"})
@@ -196,6 +196,165 @@ def test_categories_endpoint_returns_top10(loaded_killer_data, data_inserter_use
     assert response.status_code == 200
     categories = {row["category"] for row in response.data["results"]}
     assert categories == {"SHIRTS", "JEANS"}
+
+
+@pytest.mark.django_db
+def test_categories_endpoint_omitting_brand_code_combines_every_active_brand(
+    loaded_killer_data, data_inserter_user
+):
+    """Client feedback: the Categories page's default view is every
+    active brand combined too, same convention as the Dashboard/Stores."""
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/categories/")
+
+    assert response.status_code == 200
+    assert response.data["brand_code"] is None
+    categories = {row["category"] for row in response.data["results"]}
+    assert categories == {"SHIRTS", "JEANS"}
+
+
+@pytest.mark.django_db
+def test_categories_filter_options_endpoint_returns_real_distinct_values(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/categories/filter-options/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    assert response.data["financial_years"] == ["23-24"]
+    assert response.data["stores"] == ["AADARSH ENTERPRISES - DUMRAO"]
+
+
+@pytest.mark.django_db
+def test_categories_chart_endpoint_returns_per_category_breakdown(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/analytics/categories/chart/", {"brand_code": "KILLER", "categories": "SHIRTS,JEANS"}
+    )
+
+    assert response.status_code == 200
+    assert response.data["granularity"] == "year"
+    by_category = {s["category"]: s["breakdown"] for s in response.data["series"]}
+    assert set(by_category) == {"SHIRTS", "JEANS"}
+    assert by_category["SHIRTS"][0]["label"] == "23-24"
+
+
+@pytest.mark.django_db
+def test_subcategories_endpoint_returns_every_subcategory_ranked(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/subcategories/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    subcategories = {row["sub_category"] for row in response.data["results"]}
+    assert subcategories == {"SHIRTS", "JEANS"}
+
+
+@pytest.mark.django_db
+def test_subcategories_filter_options_endpoint_returns_real_distinct_values(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/subcategories/filter-options/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    assert response.data["financial_years"] == ["23-24"]
+
+
+@pytest.mark.django_db
+def test_subcategories_chart_endpoint_returns_per_subcategory_breakdown(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/analytics/subcategories/chart/",
+        {"brand_code": "KILLER", "sub_categories": "SHIRTS,JEANS"},
+    )
+
+    assert response.status_code == 200
+    by_subcategory = {s["sub_category"]: s["breakdown"] for s in response.data["series"]}
+    assert set(by_subcategory) == {"SHIRTS", "JEANS"}
+
+
+@pytest.mark.django_db
+def test_colors_endpoint_returns_every_color_ranked(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/colors/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    colors = {row["color"] for row in response.data["results"]}
+    assert colors == {"PINK", "LIGHT BLUE", "WHITE"}
+
+
+@pytest.mark.django_db
+def test_colors_filter_options_endpoint_returns_real_distinct_values(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/colors/filter-options/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    assert response.data["financial_years"] == ["23-24"]
+    assert set(response.data["categories"]) == {"SHIRTS", "JEANS"}
+
+
+@pytest.mark.django_db
+def test_colors_chart_endpoint_respects_category_filter(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/analytics/colors/chart/",
+        {"brand_code": "KILLER", "colors": "PINK,WHITE", "category": "SHIRTS"},
+    )
+
+    assert response.status_code == 200
+    by_color = {s["color"]: s["breakdown"] for s in response.data["series"]}
+    assert set(by_color) == {"PINK", "WHITE"}
+
+
+@pytest.mark.django_db
+def test_sizes_endpoint_returns_every_size_ranked(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/sizes/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    sizes = {row["size"] for row in response.data["results"]}
+    assert sizes == {"L", "32", "S"}
+
+
+@pytest.mark.django_db
+def test_sizes_filter_options_endpoint_returns_real_distinct_values(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/sizes/filter-options/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    assert response.data["financial_years"] == ["23-24"]
+
+
+@pytest.mark.django_db
+def test_sizes_chart_endpoint_returns_per_size_breakdown(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/sizes/chart/", {"brand_code": "KILLER", "sizes": "L,S"})
+
+    assert response.status_code == 200
+    by_size = {s["size"]: s["breakdown"] for s in response.data["series"]}
+    assert set(by_size) == {"L", "S"}
 
 
 @pytest.mark.django_db
@@ -269,7 +428,8 @@ def test_categories_endpoint_applies_multi_value_store_filter(
     client = _authed_client(data_inserter_user)
 
     response = client.get(
-        "/api/analytics/categories/", {"brand_code": "KILLER", "store": "ESIS170,ESIS999"}
+        "/api/analytics/categories/",
+        {"brand_code": "KILLER", "store": "AADARSH ENTERPRISES - DUMRAO,NONEXISTENT STORE"},
     )
 
     categories = {row["category"] for row in response.data["results"]}

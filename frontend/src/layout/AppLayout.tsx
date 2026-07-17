@@ -16,10 +16,18 @@ import { FilterBar } from '../filters/FilterBar'
 
 const { Header, Sider, Content } = Layout
 
+// Subcategory/Color/Size read as children of Categories (client
+// feedback) -- a flat, always-visible list with a slight indent, not a
+// collapsible AntD submenu (no click-to-expand needed).
+const childLabel = (text: string) => <span style={{ paddingLeft: 24 }}>{text}</span>
+
 const NAV_ITEMS = [
   { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: '/stores', icon: <ShopOutlined />, label: 'Stores' },
   { key: '/categories', icon: <AppstoreOutlined />, label: 'Categories' },
+  { key: '/subcategories', label: childLabel('Subcategory') },
+  { key: '/colors', label: childLabel('Color') },
+  { key: '/sizes', label: childLabel('Size') },
   { key: '/trends', icon: <LineChartOutlined />, label: 'Trends' },
   { key: '/upload', icon: <UploadOutlined />, label: 'Upload' },
 ]
@@ -86,7 +94,15 @@ export function AppLayout() {
               </span>
             </Dropdown>
           </Header>
-          {!['/upload', '/', '/stores'].includes(location.pathname) && <FilterBar />}
+          {![
+            '/upload',
+            '/',
+            '/stores',
+            '/categories',
+            '/subcategories',
+            '/colors',
+            '/sizes',
+          ].includes(location.pathname) && <FilterBar />}
           <Content style={{ margin: 16 }}>
             <Outlet />
           </Content>
