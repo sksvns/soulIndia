@@ -1,11 +1,16 @@
 """Derived-field exceptions to "never derive, always trust as supplied" --
-currently only Pepe's financial_year (docs/schema.md, confirmed 2026-07-05).
-A new derived field is a deliberate, reviewed code addition here, not a
-config-only change: unlike ordinary column routing, a derivation is a
-business rule about how to compute a value, not just where to find it.
+Pepe's financial_year (docs/schema.md, confirmed 2026-07-05) and Kraus's
+unit_mrp (confirmed 2026-07-18: Kraus's source file has no per-unit MRP
+column at all, only a line-total MRP and quantity). A new derived field
+is a deliberate, reviewed code addition here, not a config-only change:
+unlike ordinary column routing, a derivation is a business rule about how
+to compute a value, not just where to find it. Dispatch is by canonical
+field name -- each derivable field has exactly one derivation rule, never
+several competing ones a config would need to pick between.
 """
 
 import re
+from decimal import Decimal
 
 MONTH_NAME_TO_NUMBER = {
     "JANUARY": 1,
@@ -45,12 +50,30 @@ def financial_year_from_month_text(month_text: str) -> str:
     return f"{start_year % 100:02d}-{(start_year + 1) % 100:02d}"
 
 
+def unit_mrp_from_mrp_and_quantity(row: dict) -> Decimal | None:
+    """Kraus has no per-unit MRP column in its source file, only a line-
+    total MRP and quantity (confirmed 2026-07-18) -- unit_mrp = mrp_value
+    / quantity, the field's literal meaning, with no other source to
+    trust instead. abs() handles return rows (quantity and mrp_value both
+    negative; the per-unit price itself is still positive)."""
+    mrp_value = row.get("mrp_value")
+    quantity = row.get("quantity")
+    if mrp_value is None or not quantity:
+        return None
+    return abs(mrp_value / quantity)
+
+
 def apply_derived_fields(canonical_row: dict, validation_rules: dict) -> dict:
     """Fills in any field declared under validation_rules.derived_fields that
     the brand didn't supply directly. Mutates and returns canonical_row."""
     for field_name, spec in validation_rules.get("derived_fields", {}).items():
         if canonical_row.get(field_name):
             continue  # brand actually supplied it; never override
+
+        if field_name == "unit_mrp":
+            canonical_row[field_name] = unit_mrp_from_mrp_and_quantity(canonical_row)
+            continue
+
         source_field = spec.get("derived_from", "").lower()
         source_value = canonical_row.get(source_field)
         if not source_value:
