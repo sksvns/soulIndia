@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Card,
   Select,
@@ -13,12 +13,10 @@ import {
 import { UploadOutlined, DownloadOutlined, InboxOutlined } from '@ant-design/icons'
 import { isAxiosError } from 'axios'
 import { fetchUploadConfigs } from '../api/masterdata'
-import { downloadErrorReport, fetchUploadStatus, uploadFile } from '../api/ingestion'
+import { downloadErrorReport } from '../api/ingestion'
 import { useAuth } from '../auth/AuthContext'
-import type { UploadBatch, UploadConfig, UploadStatus } from '../types'
-
-const TERMINAL_STATUSES: UploadStatus[] = ['loaded', 'failed', 'rolled_back']
-const POLL_INTERVAL_MS = 2000
+import { useOperations } from '../operations/OperationsContext'
+import type { UploadConfig, UploadStatus } from '../types'
 
 const STATUS_COLOR: Record<UploadStatus, string> = {
   received: 'blue',
@@ -40,23 +38,20 @@ function triggerBrowserDownload(blob: Blob, filename: string) {
 
 export function UploadPage() {
   const { hasPermission } = useAuth()
+  // uploadBatch/uploading live in OperationsProvider (mounted once in
+  // AppLayout, above this page) rather than local state -- so the poll
+  // loop that tracks this batch to completion keeps running, and its
+  // success/error toast still fires, even if the user navigates to a
+  // different page before it finishes.
+  const { uploadBatch, uploading, startUpload } = useOperations()
   const [configs, setConfigs] = useState<UploadConfig[]>([])
   const [brandCode, setBrandCode] = useState<string | undefined>(undefined)
   const [productLine, setProductLine] = useState<string | undefined>(undefined)
   const [file, setFile] = useState<File | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-  const [batch, setBatch] = useState<UploadBatch | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchUploadConfigs().then(setConfigs)
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
   }, [])
 
   const brandOptions = [...new Map(configs.map((c) => [c.brand_code, c.brand_code])).keys()].map(
@@ -66,39 +61,21 @@ export function UploadPage() {
     .filter((c) => c.brand_code === brandCode)
     .map((c) => ({ label: c.product_line, value: c.product_line }))
 
-  const startPolling = (batchId: number) => {
-    if (pollRef.current) clearInterval(pollRef.current)
-    pollRef.current = setInterval(async () => {
-      const latest = await fetchUploadStatus(batchId)
-      setBatch(latest)
-      if (TERMINAL_STATUSES.includes(latest.status) && pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-    }, POLL_INTERVAL_MS)
-  }
-
   const handleSubmit = async () => {
     if (!file || !brandCode || !productLine) return
-    setSubmitting(true)
-    setError(null)
-    setBatch(null)
+    setSubmitError(null)
     try {
-      const created = await uploadFile(file, brandCode, productLine)
-      setBatch(created)
-      startPolling(created.batch_id)
+      await startUpload(file, brandCode, productLine)
     } catch (err) {
       const detail = isAxiosError(err) ? err.response?.data?.detail : undefined
-      setError(detail || 'Upload failed to start -- check the file and try again.')
-    } finally {
-      setSubmitting(false)
+      setSubmitError(detail || 'Upload failed to start -- check the file and try again.')
     }
   }
 
   const handleDownloadErrorReport = async () => {
-    if (!batch) return
-    const blob = await downloadErrorReport(batch.batch_id)
-    triggerBrowserDownload(blob, `batch_${batch.batch_id}_errors.csv`)
+    if (!uploadBatch) return
+    const blob = await downloadErrorReport(uploadBatch.batch_id)
+    triggerBrowserDownload(blob, `batch_${uploadBatch.batch_id}_errors.csv`)
   }
 
   if (!hasPermission('ingestion.add_uploadbatch')) {
@@ -156,34 +133,36 @@ export function UploadPage() {
           type="primary"
           icon={<UploadOutlined />}
           disabled={!file || !brandCode || !productLine}
-          loading={submitting}
+          loading={uploading}
           onClick={handleSubmit}
         >
           Upload
         </Button>
 
-        {error && <Alert type="error" title={error} showIcon />}
+        {submitError && <Alert type="error" title={submitError} showIcon />}
 
-        {batch && (
-          <Card size="small" title={`Batch #${batch.batch_id}`}>
+        {uploadBatch && (
+          <Card size="small" title={`Batch #${uploadBatch.batch_id}`}>
             <Descriptions column={1} size="small">
-              <Descriptions.Item label="File">{batch.file_name}</Descriptions.Item>
+              <Descriptions.Item label="File">{uploadBatch.file_name}</Descriptions.Item>
               <Descriptions.Item label="Status">
-                <Tag color={STATUS_COLOR[batch.status]}>{batch.status}</Tag>
+                <Tag color={STATUS_COLOR[uploadBatch.status]}>{uploadBatch.status}</Tag>
               </Descriptions.Item>
-              {batch.row_count !== null && (
-                <Descriptions.Item label="Rows loaded">{batch.row_count}</Descriptions.Item>
+              {uploadBatch.row_count !== null && (
+                <Descriptions.Item label="Rows loaded">{uploadBatch.row_count}</Descriptions.Item>
               )}
-              {batch.error_count !== null && batch.error_count > 0 && (
-                <Descriptions.Item label="Rows rejected">{batch.error_count}</Descriptions.Item>
+              {uploadBatch.error_count !== null && uploadBatch.error_count > 0 && (
+                <Descriptions.Item label="Rows rejected">
+                  {uploadBatch.error_count}
+                </Descriptions.Item>
               )}
-              {batch.failure_reason && (
+              {uploadBatch.failure_reason && (
                 <Descriptions.Item label="Reason">
-                  <Typography.Text type="danger">{batch.failure_reason}</Typography.Text>
+                  <Typography.Text type="danger">{uploadBatch.failure_reason}</Typography.Text>
                 </Descriptions.Item>
               )}
             </Descriptions>
-            {batch.error_report_key && (
+            {uploadBatch.error_report_key && (
               <Button
                 style={{ marginTop: 12 }}
                 icon={<DownloadOutlined />}

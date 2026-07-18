@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Modal, Select, Space, message } from 'antd'
+import { Alert, Button, Card, Descriptions, Modal, Select, Space } from 'antd'
 import { DeleteOutlined, ExclamationCircleFilled } from '@ant-design/icons'
 import { isAxiosError } from 'axios'
 import { fetchDashboardFilterOptions } from '../api/analytics'
-import { deleteData, fetchDeletePreview } from '../api/ingestion'
+import { fetchDeletePreview } from '../api/ingestion'
 import { fetchUploadConfigs } from '../api/masterdata'
 import { useAuth } from '../auth/AuthContext'
+import { useOperations } from '../operations/OperationsContext'
 import { formatINR } from '../utils/format'
 import type { DeletePreview, UploadConfig } from '../types'
 
@@ -30,6 +31,11 @@ function monthLabel(month: number | undefined): string {
 
 export function DeleteDataPage() {
   const { hasPermission } = useAuth()
+  // The delete request itself is dispatched through OperationsProvider
+  // (mounted once in AppLayout) rather than called directly here -- so its
+  // success/error toast still fires even if the user has already navigated
+  // to a different page by the time it resolves.
+  const { deleting, startDelete } = useOperations()
   const [configs, setConfigs] = useState<UploadConfig[]>([])
   const [brandCode, setBrandCode] = useState<string | undefined>(undefined)
   const [productLine, setProductLine] = useState<string | undefined>(undefined)
@@ -39,7 +45,6 @@ export function DeleteDataPage() {
   const [preview, setPreview] = useState<DeletePreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     fetchUploadConfigs().then(setConfigs)
@@ -115,18 +120,14 @@ export function DeleteDataPage() {
         </div>
       ),
       onOk: async () => {
-        setDeleting(true)
         try {
-          const result = await deleteData(target)
-          message.success(`Deleted ${result.deleted_count.toLocaleString()} row(s).`)
+          await startDelete(target)
           setPreview(null)
           setFinancialYear(undefined)
           setMonth(undefined)
-        } catch (err) {
-          const detail = isAxiosError(err) ? err.response?.data?.detail : undefined
-          message.error(detail || 'Delete failed -- nothing may have changed.')
-        } finally {
-          setDeleting(false)
+        } catch {
+          // failure toast already shown by startDelete -- let the dialog
+          // close either way rather than getting stuck open on it.
         }
       },
     })
