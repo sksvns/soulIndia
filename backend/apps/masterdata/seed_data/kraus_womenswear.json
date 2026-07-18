@@ -1,32 +1,30 @@
 {
   "brand_code": "KRAUS",
   "product_line": "womenswear",
-  "date_source": "Transaction Date",
+  "date_source": "CORRECTED DATE",
   "header_normalization": "trim, collapse internal whitespace/newlines to a single space, uppercase",
-  "source_file_reference": "Kraus Sales.xlsx, single unnamed sheet",
+  "source_file_reference": "KRAUS - SALE REPORT-YTD-June.xlsx, sheet 'SALE REPORT' -- client-confirmed 2026-07-18 (WhatsApp: 'Use this, we will use the same format going forward') this is the ongoing export format. Supersedes the original one-off sample (Kraus Sales.xlsx, TRANSACTION DATE/RETAILER/ARTICLE NO/STYLE NAME vocabulary) this brand was onboarded against earlier the same day -- that mapping never had any real data loaded under it (0 fact_sales rows for KRAUS at the time of this change), so this is a clean replacement, not a migration.",
+  "sheet_name": "SALE REPORT",
   "column_map": {
-    "sale_date": { "source": ["TRANSACTION DATE"], "cast": "excel_serial_date", "required": true },
-    "invoice_no": { "source": ["TRANSACTION NO"], "cast": "str", "required": true },
-    "store_code": { "source": ["TRANSACTION LOCATION ID"], "cast": "str", "required": true },
-    "store_name": { "source": ["RETAILER"], "cast": "str", "required": true },
-    "barcode": { "source": ["ITEM CODE W/O BATCH"], "cast": "barcode", "required": true },
-    "article_code": { "source": ["STYLE NAME"], "cast": "str", "required": true },
-    "category": { "source": ["ARTICLE NO"], "cast": "str", "required": true },
-    "size": { "source": ["SIZE NAME"], "cast": "str" },
+    "sale_date": { "source": ["CORRECTED DATE"], "cast": "excel_serial_date", "required": true },
+    "month": { "source": ["MONTH"], "cast": "str", "trusted_as_supplied": true },
+    "invoice_no": { "source": ["INVOICE NO"], "cast": "str", "required": true },
+    "store_code": { "source": ["STORE CODE"], "cast": "str", "required": true },
+    "store_name": { "source": ["STORE NAME"], "cast": "str" },
+    "barcode": { "source": ["EAN CODE"], "cast": "barcode", "required": true },
+    "article_code": { "source": ["ITEM NAME"], "cast": "str", "required": true },
+    "category": { "source": ["CATEGORY"], "cast": "str" },
+    "color": { "source": ["SHADE"], "cast": "str" },
+    "size": { "source": ["SIZE"], "cast": "str" },
     "unit_mrp": { "cast": "decimal", "required": true },
-    "quantity": { "source": ["TRANSACTION QUANTITY"], "cast": "int", "required": true },
-    "mrp_value": { "source": ["TRANSACTION VALUE AT MRP"], "cast": "decimal", "required": true },
-    "net_value": { "source": ["TRANSACTION VALUE WITH GST"], "cast": "decimal", "default_if_blank": "0" },
-    "discount_value": { "source": ["TOTAL DISCOUNT AMT"], "cast": "decimal", "default_if_blank": "0" },
-    "supplied_discount_pct": { "source": ["TOTAL DISCOUNT PCT"], "cast": "decimal", "validate_only": true }
+    "quantity": { "source": ["QTY SALE"], "cast": "int", "required": true },
+    "mrp_value": { "source": ["MRP VALUE"], "cast": "decimal", "required": true },
+    "net_value": { "source": ["NET SALE VALUE"], "cast": "decimal", "default_if_blank": "0" },
+    "discount_value": { "source": ["DISCOUNT VALUE"], "cast": "decimal", "default_if_blank": "0" }
   },
   "extra_source_columns": [
-    "Transaction Type",
-    "Supplier Name",
-    "Brand Name",
-    "Eoss Scheme Name",
-    "Bill Discount Amt",
-    "Item Discount Amt"
+    "INVOICE DATE",
+    "BRAND"
   ],
   "validation_rules": {
     "required_canonical_fields": [
@@ -35,23 +33,21 @@
     ],
     "derived_fields": {
       "unit_mrp": {
-        "reason": "Kraus's source file has no per-unit MRP column at all -- only a line-total 'Transaction Value at MRP' and 'Transaction Quantity'. Confirmed 2026-07-18: no other column carries a per-unit price. Derived as mrp_value / quantity (see apps.ingestion.derivations.unit_mrp_from_mrp_and_quantity), unlike every other brand where unit MRP is supplied directly."
+        "reason": "Same derivation as the original Kraus mapping -- this file has no per-unit MRP column either, only a line-total MRP VALUE and QTY SALE. Verified against the real file (2026-07-18): a qty=2 row (LTT-233, net=2160, mrp=3598) divides out to the exact same per-unit net/mrp values as a qty=1 row for the same style (LTT-217, net=1080, mrp=1799), confirming MRP VALUE scales with quantity rather than being a per-unit price. unit_mrp = mrp_value / quantity (apps.ingestion.derivations.unit_mrp_from_mrp_and_quantity)."
       }
     },
-    "is_return_when": "quantity < 0 OR mrp_value < 0 (matches every other brand's convention; confirmed in the 63-row sample: return rows have both quantity and mrp_value negative, invoice_no carries an 'R' infix e.g. '0202R-000625')",
-    "discount_pct_tolerance_pct": 2.0,
-    "divide_by_zero_guard": "if mrp_value == 0, discount_pct is null, not an error",
+    "is_return_when": "quantity < 0 OR mrp_value < 0 (verified against the real file: all 24 return rows have both quantity and mrp_value negative together, never just one -- no inconsistent-sign rows found)",
     "notes": [
-      "Unlike Killer/Pepe/Junior Killer, this file has no shared column vocabulary at all -- built from scratch by inspecting the actual sample file (Kraus Sales.xlsx, 63 rows, single store 'The Bombay Fashion' / location '02'), not a client-supplied mapping document.",
-      "ARTICLE NO has only 4 distinct values in the sample (L TOP, L TROUSER, L DENIM, L CARGO PANT) -- clearly a garment type, not a real per-SKU code, so it maps to category. The actual per-SKU code is STYLE NAME (e.g. LTA-2338), mapped to article_code. Client-confirmed 2026-07-18.",
-      "No sub_category-equivalent column exists in this file -- left unmapped, same as any brand that doesn't supply an optional dimension.",
-      "EOSS SCHEME NAME is a promo-scheme label (e.g. 'B1-30,B2-40,KRAUS' = a buy-1/buy-2 discount tier), not an actual fashion season like SS23/AW23 -- client-confirmed 2026-07-18 to leave it unmapped (captured to extra for audit) rather than mismap it onto season.",
-      "TOTAL DISCOUNT AMT (not ITEM DISCOUNT AMT alone) is mapped to discount_value: in the sample data BILL DISCOUNT AMT is always 0 so the two are identical, but TOTAL is the one that's actually documented as bill+item combined, so it's the correct source if a future file ever has a nonzero bill-level discount. ITEM/BILL amounts are kept in extra for audit.",
-      "TOTAL DISCOUNT PCT is already a plain percentage (e.g. 10.00 meaning 10%), unlike Pepe's WAD column which is a fraction (0.30...) needing fraction_to_percent -- cast as a plain decimal here, not fraction_to_percent.",
-      "SIZE NAME is a combined field (e.g. '26 / S', or occasionally 'S / W-86CM') with no consistent single delimiter/order across rows -- stored as-is in size rather than attempting to split it into two fields.",
-      "SUPPLIER NAME (always 'SOUL INDIA (PEPE)' in the sample) and BRAND NAME (always 'KRAUS') are redundant with the (brand, product_line) upload context that selects this config -- not treated as authoritative, captured to extra for audit only, same convention as Killer's BRAND column.",
-      "TRANSACTION TYPE is 'Retail Sales' for every sampled row -- no other value observed yet; captured to extra rather than assumed constant, since a future file could carry an exchange/other transaction type this config hasn't seen.",
-      "This is a small (63-row), single-store sample file, not a multi-month/multi-store historical export like the other three brands' original samples -- re-verify these assumptions (especially the return-row sign convention and unit_mrp derivation) once a larger real file is available."
+      "This file has TWO sheets -- 'REPORT' (an 8-row pivot summary) and 'SALE REPORT' (the real 718-row transaction detail). sheet_name is set explicitly to 'SALE REPORT': the sheet-name-fallback (falls back to sheet index 0 if the configured name isn't found) would otherwise silently land on 'REPORT' instead, ingesting an 8-row pivot summary rather than the 718 real transactions.",
+      "This is a YTD (year-to-date) export -- one file's MONTH column spans January through June 2026 (6 distinct months, verified), not a single month like every other brand's routine upload. Operational consequence worth the client being aware of: since fact_sales replace is scoped by (store, month) slice (ADR-0002), every future YTD upload will re-touch every prior month's slice, which by then already has data -- so ADR-0003's alter_existing_data gate (Super Admin) will fire on every routine Kraus upload from here on, not just genuine corrections, unlike every other brand's single-month day-to-day upload.",
+      "sale_date is sourced from CORRECTED DATE, not INVOICE DATE. Verified against the real file: CORRECTED DATE is a clean, 100%-populated datetime value on all 718 rows; INVOICE DATE is inconsistently typed (498 rows a datetime, 220 a string, split across two different string date formats). CORRECTED DATE's name and its consistency both point to it being the client's own reconciled date -- INVOICE DATE is captured to extra for audit only, never used as authoritative.",
+      "CATEGORY is genuinely inconsistent in this file -- 59 distinct values across 718 rows, mixing plain garment/fit descriptors (TREGGING, BAGGY, STRAIGHT, WIDE), broader labels with a trailing 'L' (T-SHIRTS L, JEANS L), and season-prefixed labels (S26 KRAUS T-SHIRT, W25 KRAUS TREGGING) -- sometimes all three styles appear for the exact same ITEM NAME prefix (e.g. every LFA- row is some mix of JEANS L / WIDE / STRAIGHT / L DENIM / FLARE). Mapped as-supplied anyway, same as every other brand's category (never re-classified on our side), but worth flagging back to the client if Kraus's category-based reporting looks fragmented -- it traces to their own export, not this pipeline.",
+      "category, store_name and color (SHADE) are NOT in required_canonical_fields here, unlike the original mapping (which required category and store_name) -- the real file has a small number of genuinely blank cells for category (2/718) and color (4/718) with no sensible default, and this now matches the same required-field baseline used by Killer/Pepe/Junior Killer/Pepe Kids rather than the original mapping's one-off deviation from it.",
+      "No supplied discount-percentage column exists in this file at all (unlike the original mapping's TOTAL DISCOUNT PCT, or Pepe's WAD) -- the discount-percent sanity cross-check only runs if a supplied value is present (apps.ingestion.validation), so this is simply omitted rather than needing a placeholder.",
+      "EAN CODE has trailing non-breaking-space padding on a meaningful minority of rows (191/718, e.g. '8905747548711\\xa0\\xa0\\xa0...') -- confirmed the existing barcode caster's str.strip() already strips \\xa0 along with ordinary whitespace, so this needed no code change, just verification that it was actually handled.",
+      "STORE NAME has an inconsistent-casing duplicate ('PANKH' vs 'Pankh', same STORE CODE 'KRA-1') -- confirmed harmless: store identity resolves by STORE CODE alone (apps.ingestion.dimension_resolver.resolve_stores), and store_name is one of row_mapper's TEXT_DIMENSION_FIELDS, uppercased unconditionally regardless of this config -- both variants normalize to the same 'PANKH' before a store row is ever created.",
+      "INVOICE NO is mixed int/str in the raw file (382/336 rows respectively), same convention as Pepe's BillNo and Killer's Bill No -- always cast to string, never numeric.",
+      "This one file shows 3 distinct (STORE CODE, STORE NAME) identities: KRA-1/PANKH, KRA-2/DAFTARI TEXTILES PVT LTD, KRA-3/THE BOMBAY FASHION -- Kraus appears to sell through a small reseller/distributor network rather than only its own stores."
     ]
   }
 }
