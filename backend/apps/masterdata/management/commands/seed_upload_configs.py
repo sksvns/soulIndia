@@ -11,6 +11,7 @@ CONFIG_FILES = [
     "pepe_menswear.json",
     "junior_killer_kids.json",
     "kraus_womenswear.json",
+    "pepe_kids_kids.json",
 ]
 
 

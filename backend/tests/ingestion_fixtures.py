@@ -740,3 +740,120 @@ KRAUS_BAD_ROWS = [
 
 def kraus_workbook(rows):
     return build_workbook(KRAUS_HEADERS, rows)
+
+
+# Pepe Kids: client-confirmed 2026-07-18 same column template as Pepe
+# menswear (PEPE_HEADERS reused as-is), but a genuinely distinct brand --
+# own DimBrand row, own (brand, product_line) config, and its own store-
+# code namespace even for a store that also carries Pepe menswear (same
+# convention as Killer vs Junior Killer). Store codes below are
+# deliberately different from PEPE_GOOD_ROWS' SI-xxx codes to reflect
+# that. No real Pepe Kids sample file exists yet -- these rows mirror
+# PEPE_GOOD_ROWS' shape (same column vocabulary, a normal sale, a
+# different-month sale, and a return), not values taken from a real file.
+PEPE_KIDS_GOOD_ROWS = [
+    {
+        "Store Name": "LITTLE STARS - PURNEA",
+        "CITY": "PURNEA",
+        "STORE CODE": "SIK-032",
+        "MONTH": "JANUARY- 2026",
+        "QUARTERS": "Q- 4",
+        "DATE": date(2026, 1, 15),
+        "BillNo": "KIDS26-10001",
+        "STOCKNo": 8905875293200,
+        "PC9": "PK308998",
+        "Size": "5-6Y",
+        "MRP": 999,
+        "Units": 1,
+        "Total MRP": 999,
+        "Net Sale Price": 799,
+        "Actual Disc": 200,
+        "WAD": 0.2002002002002002,
+        "GENDER": "BOYS",
+        "GEN - CAT": "TOP WEAR",
+        "CATEGORY": "T-SHIRTS",
+        "FIT": "REGULAR",
+        "COLOR": "BLUE",
+        "SEASON": "FASHION BASICS",
+    },
+    {
+        "Store Name": "LITTLE STARS - PURNEA",
+        "CITY": "PURNEA",
+        "STORE CODE": "SIK-032",
+        "MONTH": "APRIL- 2026",
+        "QUARTERS": "Q- 1",
+        "DATE": date(2026, 4, 3),
+        "BillNo": "KIDS26-10083",
+        "STOCKNo": 8905875558600,
+        "PC9": "PK3091063",
+        "Size": "7-8Y",
+        "MRP": 1299,
+        "Units": 1,
+        "Total MRP": 1299,
+        "Net Sale Price": 1169,
+        "Actual Disc": 130,
+        "WAD": 0.10007698229407236,
+        "GENDER": "GIRLS",
+        "GEN - CAT": "TOP WEAR",
+        "CATEGORY": "FROCKS",
+        "FIT": "REGULAR",
+        "COLOR": "PINK",
+        "SEASON": "AW25",
+    },
+    {
+        # Real return row shape (same convention as Pepe menswear): all
+        # negative together.
+        "Store Name": "KIDDIE CORNER - HAJIPUR",
+        "CITY": "HAJIPUR",
+        "STORE CODE": "SIK-008",
+        "MONTH": "JANUARY- 2026",
+        "QUARTERS": "Q- 4",
+        "DATE": date(2026, 1, 24),
+        "BillNo": "0101K-019700",
+        "STOCKNo": 8905875451400,
+        "PC9": "PK3090959",
+        "Size": "3-4Y",
+        "MRP": 899,
+        "Units": -1,
+        "Total MRP": -899,
+        "Net Sale Price": -539.4,
+        "Actual Disc": -359.6,
+        "WAD": 0.40,
+        "GENDER": "BOYS",
+        "GEN - CAT": "TOP WEAR",
+        "CATEGORY": "T-SHIRTS",
+        "FIT": "REGULAR",
+        "COLOR": "GREEN",
+        "SEASON": "AW25",
+    },
+]
+
+PEPE_KIDS_BAD_ROWS = [
+    {
+        **PEPE_KIDS_GOOD_ROWS[0],
+        "BillNo": "KIDS26-90001",
+        "STOCKNo": None,  # required field missing
+    },
+    {
+        **PEPE_KIDS_GOOD_ROWS[0],
+        "BillNo": "KIDS26-90002",
+        "Units": 0,  # zero-quantity / GWP-style row
+    },
+    {
+        **PEPE_KIDS_GOOD_ROWS[0],
+        "BillNo": "KIDS26-90003",
+        "Units": -1,
+        "Net Sale Price": -799,
+        # Total MRP stays +999 (inherited): negative qty + positive
+        # mrp_value has no legitimate real-data match.
+    },
+    {
+        **PEPE_KIDS_GOOD_ROWS[0],
+        "BillNo": "KIDS26-90004",
+        "DATE": "not-a-date",
+    },
+]
+
+
+def pepe_kids_workbook(rows):
+    return build_workbook(PEPE_HEADERS, rows, sheet_name=PEPE_SHEET_NAME)

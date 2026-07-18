@@ -1,0 +1,64 @@
+{
+  "brand_code": "PEPE_KIDS",
+  "product_line": "kids",
+  "date_source": "DATE",
+  "header_normalization": "trim, collapse internal whitespace/newlines to a single space, uppercase",
+  "source_file_reference": "Same column template as Pepe's PEPE BIHAR DSR REPORT 2026.xlsb, sheet 'PEPE DSR- 2026' -- no distinct Pepe Kids sample file inspected yet, confirmed with client 2026-07-18 that the export format is identical to menswear. Onboarded as a genuinely distinct brand (own DimBrand row, own (brand, product_line) config), not a second product_line under the existing PEPE brand: the client confirmed a store selling both Pepe menswear and Pepe Kids uses a DIFFERENT store code for the Kids side, same convention as Killer vs Junior Killer -- store codes are unique only within a brand, so a shared store network would mean a shared brand, but this one doesn't share codes.",
+  "sheet_name": "PEPE DSR- 2026",
+  "column_map": {
+    "sale_date": { "source": ["DATE"], "cast": "excel_serial_date", "required": true },
+    "month": { "source": ["MONTH"], "cast": "str", "trusted_as_supplied": true },
+    "quarter": { "source": ["QUARTERS"], "cast": "str", "trusted_as_supplied": true },
+    "season": { "source": ["SEASON"], "cast": "str", "trusted_as_supplied": true },
+    "invoice_no": { "source": ["BILLNO"], "cast": "str", "required": true },
+    "store_code": { "source": ["STORE CODE"], "cast": "str", "required": true },
+    "store_name": { "source": ["STORE NAME"], "cast": "str", "required": true },
+    "city": { "source": ["CITY"], "cast": "str" },
+    "barcode": { "source": ["STOCKNO"], "cast": "barcode", "required": true },
+    "article_code": { "source": ["PC9"], "cast": "str", "required": true },
+    "size": { "source": ["SIZE"], "cast": "str" },
+    "color": { "source": ["COLOR"], "cast": "str" },
+    "gender": { "source": ["GENDER"], "cast": "str" },
+    "category": { "source": ["GEN - CAT"], "cast": "str", "required": true },
+    "sub_category": { "source": ["CATEGORY"], "cast": "str" },
+    "fit": { "source": ["FIT"], "cast": "str" },
+    "unit_mrp": { "source": ["MRP"], "cast": "decimal", "required": true },
+    "quantity": { "source": ["UNITS"], "cast": "int", "required": true },
+    "mrp_value": { "source": ["TOTAL MRP"], "cast": "decimal", "required": true },
+    "net_value": { "source": ["NET SALE PRICE"], "cast": "decimal", "default_if_blank": "0" },
+    "discount_value": { "source": ["ACTUAL DISC"], "cast": "decimal", "default_if_blank": "0" },
+    "supplied_discount_pct": { "source": ["WAD"], "cast": "fraction_to_percent", "validate_only": true }
+  },
+  "financial_year": {
+    "mode": "derived_exception",
+    "reason": "Assumed identical to Pepe menswear's derivation (same file template, no FY column) -- confirm once a real Pepe Kids file is available; if it turns out to supply financial_year directly, this derived_fields entry should simply be removed rather than left silently unused.",
+    "derived_from": "MONTH",
+    "parse": "MONTH is formatted '<MONTH NAME>- <YYYY>', e.g. 'JANUARY- 2026', same as Pepe menswear",
+    "rule": "financial_year (Apr-Mar) of the parsed month/year; Jan/Feb/Mar YYYY -> FY (YYYY-1)-YYYY, Apr..Dec YYYY -> FY YYYY-(YYYY+1)",
+    "output_format": "YY-YY+1 (2-digit-2-digit, matching Killer's supplied convention, e.g. '25-26')"
+  },
+  "extra_source_columns": [
+    "L2L / ANULIZED",
+    "COUNTER TYPES",
+    "BA NAME",
+    "WEARHOUSE",
+    "ATV-GWP-EOSS-FRESH",
+    "REMARKS (OFFER/FRESH)"
+  ],
+  "validation_rules": {
+    "required_canonical_fields": [
+      "sale_date", "invoice_no", "store_code", "barcode",
+      "unit_mrp", "quantity", "mrp_value"
+    ],
+    "is_return_when": "quantity < 0 OR mrp_value < 0 (assumed same convention as Pepe menswear)",
+    "discount_pct_tolerance_pct": 2.0,
+    "divide_by_zero_guard": "if mrp_value == 0, discount_pct is null, not an error",
+    "notes": [
+      "This config is a direct copy of pepe_menswear.json's column mapping -- client-confirmed 2026-07-18 the export template is identical. The only confirmed difference from Pepe menswear is the brand/store-code namespace (own DimBrand, distinct store codes even for a store shared with Pepe menswear).",
+      "Not yet verified against a real Pepe Kids file (unlike Kraus, which was built from an actual sample) -- treat every column-mapping assumption here as inherited-and-unconfirmed until a real file is uploaded. If real data reveals a different header vocabulary or a genuinely supplied financial_year, update this config the same way any other brand's mapping gets corrected once real data is seen, not by guessing further.",
+      "WAD is stored as a fraction (e.g. 0.30007...) not a percentage, same as Pepe menswear -- multiply by 100 before comparing to computed discount_pct (fraction_to_percent cast already does this).",
+      "BillNo is expected mixed-type (mostly text, occasionally a bare number) same as Pepe menswear -- always cast to string, never numeric.",
+      "Client-confirmed 2026-07-18 (same rule as every other brand): a blank NET SALE PRICE or ACTUAL DISC cell means 0, not a missing/invalid row -- defaulted via default_if_blank rather than rejected as a required-field error."
+    ]
+  }
+}
