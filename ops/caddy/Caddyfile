@@ -32,13 +32,36 @@
 		file_server
 	}
 
+	# Vite's hashed JS/CSS chunks (frontend/dist/assets/*-<hash>.{js,css}) --
+	# the filename itself changes whenever the content does, so these are
+	# safe to cache forever. Must come before the catch-all below and must
+	# NOT fall through to try_files: every deploy wipes /srv/frontend
+	# wholesale (Dockerfile.prod), so an old hash is genuinely gone, not
+	# just moved -- it needs to 404, not silently come back as index.html.
+	# That silent fallback was the sharper half of a client-reported bug
+	# (2026-07-18): a browser's cached index.html referencing a now-deleted
+	# hash would get index.html's *content* back for a <script type=module>
+	# request, which fails as a MIME-type mismatch and leaves the whole app
+	# unable to boot -- not just stale, broken, until a hard cache clear.
+	handle_path /assets/* {
+		root * /srv/frontend/assets
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
 	@backend path /api/* /admin/* /health/*
 	handle @backend {
 		reverse_proxy backend:8000
 	}
 
+	# index.html is never hashed and always names whatever asset hashes
+	# exist *right now* -- it must never be cached, or a returning browser
+	# can keep a copy from before a deploy that points at deleted assets
+	# (the other half of the same bug: even once the asset 404s cleanly,
+	# the page still can't load until a fresh index.html is fetched).
 	handle {
 		root * /srv/frontend
+		header Cache-Control "no-store"
 		try_files {path} /index.html
 		file_server
 	}
