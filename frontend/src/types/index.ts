@@ -311,3 +311,19 @@ export interface UploadBatch {
   finished_at: string | null
   created_at: string
 }
+
+// Delete Data page: brand + product_line + financial_year + month is the
+// full selection (no store filter -- deletes across every store for that
+// brand/product_line/period). Preview always reflects exactly what a
+// delete would remove (backend shares one query for both).
+export interface DeletePreview {
+  row_count: number
+  store_count: number
+  total_net_value: number | null
+  min_date: string | null
+  max_date: string | null
+}
+
+export interface DeleteResult {
+  deleted_count: number
+}

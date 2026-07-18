@@ -11,4 +11,6 @@ urlpatterns = [
         name="upload-error-report",
     ),
     path("backfill/", views.BackfillUploadView.as_view(), name="backfill-create"),
+    path("delete-preview/", views.DeletePreviewView.as_view(), name="delete-preview"),
+    path("delete/", views.DeleteDataView.as_view(), name="delete-data"),
 ]

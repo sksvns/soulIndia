@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { UploadBatch } from '../types'
+import type { DeletePreview, DeleteResult, UploadBatch } from '../types'
 
 export async function uploadFile(
   file: File,
@@ -25,6 +25,35 @@ export async function fetchUploadStatus(batchId: number): Promise<UploadBatch> {
 export async function downloadErrorReport(batchId: number): Promise<Blob> {
   const { data } = await apiClient.get(`/ingestion/uploads/${batchId}/error-report/`, {
     responseType: 'blob',
+  })
+  return data
+}
+
+export interface DeleteTarget {
+  brandCode: string
+  productLine: string
+  financialYear: string
+  month: number
+}
+
+export async function fetchDeletePreview(target: DeleteTarget): Promise<DeletePreview> {
+  const { data } = await apiClient.get<DeletePreview>('/ingestion/delete-preview/', {
+    params: {
+      brand_code: target.brandCode,
+      product_line: target.productLine,
+      financial_year: target.financialYear,
+      month: target.month,
+    },
+  })
+  return data
+}
+
+export async function deleteData(target: DeleteTarget): Promise<DeleteResult> {
+  const { data } = await apiClient.post<DeleteResult>('/ingestion/delete/', {
+    brand_code: target.brandCode,
+    product_line: target.productLine,
+    financial_year: target.financialYear,
+    month: target.month,
   })
   return data
 }
