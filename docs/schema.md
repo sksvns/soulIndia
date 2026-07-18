@@ -261,6 +261,27 @@ historical export like the other three brands' original samples -- the
 mapping above (especially the return-row sign convention and the `unit_mrp`
 derivation) should be re-verified once a larger real file is available.
 
+## Pepe Kids (kids) — same 28-column template as Pepe menswear
+
+No real Pepe Kids file inspected yet -- client-confirmed 2026-07-18 the
+export format is identical to Pepe menswear's, so this config is a direct
+copy of `pepe_menswear.json`'s `column_map`/`validation_rules` (same
+column vocabulary, same `financial_year`-from-`MONTH` derivation, same
+`WAD`-is-a-fraction handling). See Pepe's section above for the full
+column-by-column trace -- it applies unchanged here.
+
+**Onboarded as a genuinely distinct brand** (own `DimBrand` row, own
+`(brand, product_line)` config), not a second `product_line` under the
+existing `PEPE` brand: client-confirmed 2026-07-18 that a store selling
+both Pepe menswear and Pepe Kids uses a *different* store code for the
+Kids side, same convention as Killer vs Junior Killer. `product_line =
+"kids"`.
+
+Every column-mapping assumption here is inherited from Pepe menswear, not
+independently confirmed -- treat this as provisional until a real Pepe
+Kids file is uploaded and can reveal whether the header vocabulary,
+`financial_year` derivation, or `WAD` fraction convention actually hold.
+
 ## Day 2 implementation notes
 
 Two small, deliberate refinements surfaced while actually building the

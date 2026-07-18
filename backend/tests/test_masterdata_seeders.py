@@ -12,7 +12,7 @@ def test_seed_upload_configs_loads_killer_and_pepe():
 
     call_command("seed_upload_configs", stdout=StringIO())
 
-    assert BrandUploadConfig.objects.count() == 4
+    assert BrandUploadConfig.objects.count() == 5
 
     killer_config = BrandUploadConfig.objects.get(brand__brand_code="KILLER")
     assert killer_config.product_line == "menswear"
@@ -42,7 +42,7 @@ def test_seed_upload_configs_is_idempotent():
     call_command("seed_upload_configs", stdout=StringIO())
     call_command("seed_upload_configs", stdout=StringIO())
 
-    assert BrandUploadConfig.objects.count() == 4
+    assert BrandUploadConfig.objects.count() == 5
 
 
 @pytest.mark.django_db

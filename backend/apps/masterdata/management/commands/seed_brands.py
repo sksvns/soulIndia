@@ -7,6 +7,7 @@ BRANDS = [
     {"brand_code": "PEPE", "brand_name": "Pepe"},
     {"brand_code": "JUNIOR_KILLER", "brand_name": "Junior Killer"},
     {"brand_code": "KRAUS", "brand_name": "Kraus"},
+    {"brand_code": "PEPE_KIDS", "brand_name": "Pepe Kids"},
 ]
 
 

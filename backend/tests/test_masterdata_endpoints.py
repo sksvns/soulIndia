@@ -21,7 +21,7 @@ def test_brand_list_returns_active_brands_sorted_by_name(data_inserter_user):
     assert response.status_code == 200
     codes = [b["brand_code"] for b in response.data["brands"]]
     names = [b["brand_name"] for b in response.data["brands"]]
-    assert set(codes) == {"KILLER", "PEPE", "JUNIOR_KILLER", "KRAUS"}
+    assert set(codes) == {"KILLER", "PEPE", "JUNIOR_KILLER", "KRAUS", "PEPE_KIDS"}
     assert names == sorted(names)
 
 
@@ -64,6 +64,7 @@ def test_upload_config_list_returns_brand_product_line_pairs(data_inserter_user)
         ("PEPE", "menswear"),
         ("JUNIOR_KILLER", "kids"),
         ("KRAUS", "womenswear"),
+        ("PEPE_KIDS", "kids"),
     }
 
 
