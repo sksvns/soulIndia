@@ -12,6 +12,7 @@ import { ColorsPage } from './pages/ColorsPage'
 import { SizesPage } from './pages/SizesPage'
 import { TrendsPage } from './pages/TrendsPage'
 import { UploadPage } from './pages/UploadPage'
+import { DeleteDataPage } from './pages/DeleteDataPage'
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
                 <Route path="sizes" element={<SizesPage />} />
                 <Route path="trends" element={<TrendsPage />} />
                 <Route path="upload" element={<UploadPage />} />
+                <Route path="delete-data" element={<DeleteDataPage />} />
               </Route>
             </Route>
           </Routes>

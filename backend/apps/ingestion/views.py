@@ -1,9 +1,10 @@
 import logging
+import re
 
 from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -12,6 +13,7 @@ from rest_framework.views import APIView
 from apps.masterdata.models import BrandUploadConfig, DimBrand
 
 from . import storage
+from .loader import DataAlterationNotPermitted, delete_by_filter, preview_delete
 from .models import UploadBatch
 from .permissions import DjangoModelPermissionsIncludingView
 from .serializers import UploadBatchSerializer
@@ -33,6 +35,81 @@ UPLOAD_REQUEST_SERIALIZER = inline_serializer(
         "product_line": serializers.CharField(help_text="e.g. menswear"),
     },
 )
+
+FINANCIAL_YEAR_RE = re.compile(r"^\d{2}-\d{2}$")
+
+DELETE_REQUEST_SERIALIZER = inline_serializer(
+    "DeleteDataRequest",
+    {
+        "brand_code": serializers.CharField(help_text="e.g. KILLER, PEPE"),
+        "product_line": serializers.CharField(help_text="e.g. menswear"),
+        "financial_year": serializers.CharField(help_text="e.g. 25-26"),
+        "month": serializers.IntegerField(help_text="1-12"),
+    },
+)
+
+DELETE_PREVIEW_RESPONSE_SERIALIZER = inline_serializer(
+    "DeletePreviewResponse",
+    {
+        "row_count": serializers.IntegerField(),
+        "store_count": serializers.IntegerField(),
+        "total_net_value": serializers.DecimalField(
+            max_digits=16, decimal_places=2, allow_null=True
+        ),
+        "min_date": serializers.DateField(allow_null=True),
+        "max_date": serializers.DateField(allow_null=True),
+    },
+)
+
+DELETE_RESPONSE_SERIALIZER = inline_serializer(
+    "DeleteDataResponse", {"deleted_count": serializers.IntegerField()}
+)
+
+
+def _resolve_delete_target(params):
+    """Shared brand/product_line/financial_year/month resolution +
+    validation for the Delete Data preview and delete endpoints -- both
+    must scope to the exact same target, so they share one resolver rather
+    than parsing independently and risking the two drifting apart.
+
+    Returns (target, None) on success, where target is
+    (brand, product_line, financial_year, month_no), or (None, error_response)
+    on a request-shape problem.
+    """
+    brand_code = params.get("brand_code", "")
+    product_line = params.get("product_line", "")
+    financial_year = params.get("financial_year", "")
+    month_raw = params.get("month", "")
+
+    if not brand_code or not product_line or not financial_year or not month_raw:
+        return None, Response(
+            {"detail": "brand_code, product_line, financial_year and month are all required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not FINANCIAL_YEAR_RE.match(financial_year):
+        return None, Response(
+            {"detail": f"financial_year must look like '25-26', got '{financial_year}'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        month_no = int(month_raw)
+    except (TypeError, ValueError):
+        return None, Response(
+            {"detail": f"month must be an integer 1-12, got '{month_raw}'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not 1 <= month_no <= 12:
+        return None, Response(
+            {"detail": f"month must be an integer 1-12, got {month_no}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    brand = get_object_or_404(DimBrand, brand_code=brand_code.upper(), active=True)
+    get_object_or_404(BrandUploadConfig, brand=brand, product_line=product_line, active=True)
+
+    return (brand, product_line, financial_year, month_no), None
 
 
 def _intake_upload(request):
@@ -189,3 +266,82 @@ class ErrorReportDownloadView(APIView):
         response = HttpResponse(body, content_type="text/csv")
         response["Content-Disposition"] = f'attachment; filename="batch_{batch_id}_errors.csv"'
         return response
+
+
+class DeletePreviewView(APIView):
+    """Read-only summary (row count, store count, total net value, date
+    range) of what a Delete Data request would remove -- powers the
+    confirmation dialog's preview. Never alters anything, so never audited
+    (ADR-0003 audits alterations, not reads); still requires authentication
+    and view-level permission, same as every other endpoint here.
+    """
+
+    queryset = UploadBatch.objects.all()
+    permission_classes = [DjangoModelPermissionsIncludingView]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("brand_code", str),
+            OpenApiParameter("product_line", str),
+            OpenApiParameter("financial_year", str, description="e.g. 25-26"),
+            OpenApiParameter("month", int, description="1-12"),
+        ],
+        responses=DELETE_PREVIEW_RESPONSE_SERIALIZER,
+    )
+    def get(self, request):
+        target, error = _resolve_delete_target(request.query_params)
+        if error:
+            return error
+        brand, product_line, financial_year, month_no = target
+
+        preview = preview_delete(brand, product_line, financial_year, month_no)
+        return Response(
+            {
+                "row_count": preview["row_count"],
+                "store_count": preview["store_count"],
+                "total_net_value": preview["total_net_value"],
+                "min_date": preview["min_date"],
+                "max_date": preview["max_date"],
+            }
+        )
+
+
+class DeleteDataView(APIView):
+    """Deletes every fact_sales row for one brand + product_line +
+    financial_year + month (the Delete Data page), across however many
+    upload batches loaded into that slice.
+
+    Gated and audited exactly like batch rollback (ADR-0003):
+    `delete_by_filter` itself decides allow/block and writes the audit
+    record, so this view never short-circuits on permission before that
+    happens -- an unauthorized attempt still has to show up in the audit
+    trail, not just get a plain 403 with nothing recorded.
+    """
+
+    queryset = UploadBatch.objects.all()
+    permission_classes = [DjangoModelPermissionsIncludingView]
+
+    @extend_schema(request=DELETE_REQUEST_SERIALIZER, responses=DELETE_RESPONSE_SERIALIZER)
+    def post(self, request):
+        target, error = _resolve_delete_target(request.data)
+        if error:
+            return error
+        brand, product_line, financial_year, month_no = target
+
+        try:
+            deleted_count = delete_by_filter(
+                brand, product_line, financial_year, month_no, request.user
+            )
+        except DataAlterationNotPermitted as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+
+        logger.info(
+            "user %s deleted %s fact_sales row(s) for %s/%s FY%s month=%s",
+            request.user.email,
+            deleted_count,
+            brand.brand_code,
+            product_line,
+            financial_year,
+            month_no,
+        )
+        return Response({"deleted_count": deleted_count})

@@ -16,9 +16,12 @@ from calendar import monthrange
 from datetime import date, timedelta
 
 from django.db import connection, transaction
-from django.db.models import Count
+from django.db.models import Count, Max, Min, Sum
 from django.db.models.functions import TruncMonth
 from psycopg.types.json import Jsonb
+
+from apps.analytics import cache as analytics_cache
+from apps.analytics.materialized_views import refresh_all
 
 from . import dimension_resolver
 from .models import DataAlterationAudit, FactSales, UploadBatch
@@ -128,29 +131,36 @@ def find_conflicting_slices(brand_id: int, slices: dict) -> list[dict]:
 def _audit_and_require_permission(
     user, brand, batch, action: str, details: dict, item_count: int
 ) -> None:
-    """Every alteration attempt is recorded, allowed or not (ADR-0003)."""
+    """Every alteration attempt is recorded, allowed or not (ADR-0003).
+
+    `batch` is None for a filter-based delete (brand + product_line +
+    financial_year + month), which can span more than one batch -- there's
+    no single batch to attribute it to, so the filter criteria live in
+    `details` instead.
+    """
     allowed = user.has_perm("ingestion.alter_existing_data")
     DataAlterationAudit.objects.create(
         batch=batch, user=user, brand=brand, action=action, details=details, allowed=allowed
     )
+    batch_label = f"batch #{batch.batch_id}" if batch else "no single batch (filter-based)"
     if allowed:
         logger.info(
-            "user %s %s existing data for brand %s (batch #%s): %s",
+            "user %s %s existing data for brand %s (%s): %s",
             user.email,
             action,
             brand.brand_code,
-            batch.batch_id,
+            batch_label,
             details,
         )
         return
 
     logger.warning(
-        "BLOCKED: user %s attempted to %s existing data for brand %s (batch #%s) "
+        "BLOCKED: user %s attempted to %s existing data for brand %s (%s) "
         "without Super Admin capability: %s",
         user.email,
         action,
         brand.brand_code,
-        batch.batch_id,
+        batch_label,
         details,
     )
     raise DataAlterationNotPermitted(
@@ -325,4 +335,92 @@ def rollback_batch(batch, user) -> int:
             cursor.execute("DELETE FROM fact_sales WHERE upload_batch_id = %s", [batch.batch_id])
             deleted = cursor.rowcount
         UploadBatch.objects.filter(pk=batch.batch_id).update(status=UploadBatch.Status.ROLLED_BACK)
+
+    if deleted:
+        refresh_all()
+        analytics_cache.bust(batch.brand_id)
+    return deleted
+
+
+def _deletable_queryset(brand, product_line: str, financial_year: str, month_no: int):
+    """The exact rows a Delete Data request (brand + product_line +
+    financial_year + month) would remove. Shared by preview_delete and
+    delete_by_filter so the two can never drift apart -- the count/preview
+    the admin confirms against is guaranteed to be the same set actually
+    deleted.
+
+    Scoped by product_line via batch -> config, not a direct fact_sales
+    column (product_line only exists on BrandUploadConfig). Rows with no
+    batch (upload_batch_id IS NULL) can't be resolved to a product_line and
+    are excluded -- in practice this only affects synthetic load-test data,
+    never real brand uploads, which always go through load_batch and always
+    set a batch.
+    """
+    return FactSales.objects.filter(
+        brand=brand,
+        date__financial_year=financial_year,
+        date__month_no=month_no,
+        batch__config__product_line=product_line,
+    )
+
+
+def preview_delete(brand, product_line: str, financial_year: str, month_no: int) -> dict:
+    """Read-only summary of what a Delete Data request would remove --
+    never audited (nothing is altered by looking), just authorization-gated
+    at the view layer."""
+    return _deletable_queryset(brand, product_line, financial_year, month_no).aggregate(
+        row_count=Count("sale_id"),
+        store_count=Count("store_id", distinct=True),
+        total_net_value=Sum("net_value"),
+        min_date=Min("sale_date"),
+        max_date=Max("sale_date"),
+    )
+
+
+def delete_by_filter(brand, product_line: str, financial_year: str, month_no: int, user) -> int:
+    """Deletes every fact_sales row for one brand + product_line +
+    financial_year + month, across however many upload batches loaded into
+    that slice. Gated and audited exactly like rollback_batch (ADR-0003) --
+    the only difference is the selection criteria (a filter, not a single
+    batch), so it reuses the same permission, audit action family, and
+    post-delete refresh/cache-bust steps.
+    """
+    existing_count = _deletable_queryset(brand, product_line, financial_year, month_no).count()
+    details = {
+        "product_line": product_line,
+        "financial_year": financial_year,
+        "month_no": month_no,
+        "row_count": existing_count,
+    }
+    if existing_count > 0:
+        _audit_and_require_permission(
+            user,
+            brand,
+            None,
+            DataAlterationAudit.Action.DELETE_FILTERED,
+            details,
+            existing_count,
+        )
+
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM fact_sales fs
+                USING dim_calendar dc, upload_batch ub, brand_upload_config buc
+                WHERE fs.date_id = dc.date_id
+                  AND fs.upload_batch_id = ub.batch_id
+                  AND ub.config_id = buc.config_id
+                  AND fs.brand_id = %s
+                  AND dc.financial_year = %s
+                  AND dc.month_no = %s
+                  AND buc.product_line = %s
+                """,
+                [brand.brand_id, financial_year, month_no, product_line],
+            )
+            deleted = cursor.rowcount
+
+    if deleted:
+        refresh_all()
+        analytics_cache.bust(brand.brand_id)
     return deleted

@@ -117,21 +117,33 @@ class FactSales(models.Model):
 
 
 class DataAlterationAudit(models.Model):
-    """Every attempt to replace or roll back already-loaded sales data --
-    allowed or blocked. `ingestion.alter_existing_data` is the capability
-    that gates this (Super Admin has it, since seed_roles gives Super Admin
-    every permission that exists; Data Inserter does not, since it's not on
-    that role's curated allowlist). A fresh load into empty slices is never
-    audited here -- only genuine alterations of existing rows.
+    """Every attempt to replace, roll back, or filter-delete already-loaded
+    sales data -- allowed or blocked. `ingestion.alter_existing_data` is the
+    capability that gates this (Super Admin has it, since seed_roles gives
+    Super Admin every permission that exists; Data Inserter does not, since
+    it's not on that role's curated allowlist). A fresh load into empty
+    slices is never audited here -- only genuine alterations of existing
+    rows.
+
+    `batch` is nullable because a filter-based delete (brand + product_line
+    + financial_year + month, from the Delete Data page) can span every
+    batch that ever loaded into that slice, not just one -- there's no
+    single UploadBatch to point at, so the filter criteria and affected row
+    count live in `details` instead.
     """
 
     class Action(models.TextChoices):
         REPLACE = "replace", "Replace existing slice(s)"
         ROLLBACK = "rollback", "Roll back batch"
+        DELETE_FILTERED = "delete_filtered", "Delete by brand/product line/month/year filter"
 
     audit_id = models.BigAutoField(primary_key=True)
     batch = models.ForeignKey(
-        UploadBatch, on_delete=models.CASCADE, related_name="alteration_audits"
+        UploadBatch,
+        on_delete=models.CASCADE,
+        related_name="alteration_audits",
+        null=True,
+        blank=True,
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="alteration_audits"

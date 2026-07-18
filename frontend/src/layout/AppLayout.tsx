@@ -7,6 +7,7 @@ import {
   AppstoreOutlined,
   LineChartOutlined,
   UploadOutlined,
+  DeleteOutlined,
   UserOutlined,
   LogoutOutlined,
 } from '@ant-design/icons'
@@ -30,6 +31,7 @@ const NAV_ITEMS = [
   { key: '/sizes', label: childLabel('Size') },
   { key: '/trends', icon: <LineChartOutlined />, label: 'Trends' },
   { key: '/upload', icon: <UploadOutlined />, label: 'Upload' },
+  { key: '/delete-data', icon: <DeleteOutlined />, label: 'Delete Data' },
 ]
 
 export function AppLayout() {
@@ -96,6 +98,7 @@ export function AppLayout() {
           </Header>
           {![
             '/upload',
+            '/delete-data',
             '/',
             '/stores',
             '/categories',

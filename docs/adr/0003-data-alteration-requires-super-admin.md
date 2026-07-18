@@ -76,3 +76,27 @@ recorded for later review.
   deferred to Day 12/Phase 2 -- it needs an external service, which is
   outside the frozen Phase 1 stack and wasn't a decision to make silently
   mid-feature.
+
+**2026-07-18 update -- Delete Data page.** The client asked for a Delete
+Data page (select brand + product line + financial year + month, preview,
+one confirmation dialog, delete). This is the exact same alteration this
+ADR already governs, extended to a filter-based selection instead of a
+single batch -- `delete_by_filter` (`apps/ingestion/loader.py`) reuses
+`_audit_and_require_permission` unchanged and is gated by the same
+`ingestion.alter_existing_data` permission. Two consequences of that
+selection being a filter, not one batch:
+
+- `DataAlterationAudit.batch` is now nullable -- a filter delete can span
+  every batch that ever loaded into that (brand, product_line, financial
+  year, month) slice, so there's no single batch to attribute it to; the
+  filter criteria and affected row count live in `details` instead.
+- `preview_delete` and `delete_by_filter` share one `_deletable_queryset`
+  helper so the confirmation dialog's preview and the actual delete can
+  never drift apart -- what the admin is shown is exactly what gets
+  removed.
+
+Also fixed while building this: `rollback_batch` deleted fact rows but
+never called `refresh_all()`/`analytics_cache.bust()` afterward, unlike the
+load path -- dashboards would have kept showing rolled-back data until an
+unrelated refresh. Both `rollback_batch` and `delete_by_filter` now do
+both, only when rows were actually deleted.
