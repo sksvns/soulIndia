@@ -6,14 +6,57 @@ import { useFilters } from '../filters/FilterContext'
 import { CacheStatus } from '../components/CacheStatus'
 import { DashboardFilterBar } from '../components/DashboardFilterBar'
 import { formatINR, formatNumber } from '../utils/format'
-import type { DashboardSummary, Filters } from '../types'
+import type { DashboardBreakdownRow, DashboardSummary, Filters } from '../types'
 
 const GRANULARITY_TITLE = { year: 'year', month: 'month', week: 'week' } as const
+
+// Discount % isn't part of a dashboard breakdown row (unlike the
+// per-dimension ranking rows, which already carry it) -- same formula
+// those rows are computed with server-side, just derived client-side
+// here since mrp_value/net_value are already on hand per bar.
+function discountPct(row: DashboardBreakdownRow): number | null {
+  if (row.mrp_value === 0) return null
+  return Math.round((1 - row.net_value / row.mrp_value) * 10000) / 100
+}
+
+// Per-bar tooltip content (client feedback: hovering one bar should show
+// that bar's own pairing -- Units Sold with MRP, Units Sold with Net
+// Sales, or Discount Amount with Discount % -- not all three bars'
+// values at once). Requires trigger: 'item' (one bar at a time) rather
+// than the default 'axis' (every bar at that x-position together) --
+// the trade-off is it now takes three hovers to see all three bars,
+// where axis trigger showed them together in one box.
+function tooltipFormatter(summary: DashboardSummary) {
+  return (params: { seriesName: string; dataIndex: number; marker: string }) => {
+    const row = summary.breakdown[params.dataIndex]
+    const header = `${row.label}<br/>`
+    if (params.seriesName === 'MRP Sales') {
+      return (
+        header +
+        `${params.marker}Units Sold: ${formatNumber(row.quantity)}<br/>` +
+        `MRP Sales: ${formatINR(row.mrp_value)}`
+      )
+    }
+    if (params.seriesName === 'Net Sales') {
+      return (
+        header +
+        `${params.marker}Units Sold: ${formatNumber(row.quantity)}<br/>` +
+        `Net Sales: ${formatINR(row.net_value)}`
+      )
+    }
+    const pct = discountPct(row)
+    return (
+      header +
+      `${params.marker}Discount Amount: ${formatINR(row.discount_value)}<br/>` +
+      `Discount %: ${pct === null ? '—' : `${pct}%`}`
+    )
+  }
+}
 
 function breakdownChartOption(summary: DashboardSummary) {
   const labels = summary.breakdown.map((row) => row.label)
   return {
-    tooltip: { trigger: 'axis', valueFormatter: (v: number) => formatINR(v) },
+    tooltip: { trigger: 'item', formatter: tooltipFormatter(summary) },
     legend: { data: ['MRP Sales', 'Net Sales', 'Discount'], top: 0 },
     grid: { left: 90, right: 24, bottom: 32, top: 48 },
     xAxis: { type: 'category', data: labels },
