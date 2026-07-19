@@ -52,6 +52,13 @@ urlpatterns = [
         name="analytics-sizes-filter-options",
     ),
     path("sizes/chart/", views.SizeLineChartView.as_view(), name="analytics-sizes-chart"),
+    path("fits/", views.FitPerfView.as_view(), name="analytics-fits"),
+    path(
+        "fits/filter-options/",
+        views.FitFilterOptionsView.as_view(),
+        name="analytics-fits-filter-options",
+    ),
+    path("fits/chart/", views.FitLineChartView.as_view(), name="analytics-fits-chart"),
     path("trends/stores/", views.StoreTrendView.as_view(), name="analytics-trends-stores"),
     path(
         "trends/categories/", views.CategoryTrendView.as_view(), name="analytics-trends-categories"

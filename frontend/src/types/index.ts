@@ -283,6 +283,46 @@ export interface SizeChartResponse {
   cached_at: string
 }
 
+// Fit: same shape/conventions as Color/Size. Kraus never contributes any
+// rows here (no FIT column in its real export) -- same as it already
+// doesn't for Subcategory, not an error case the UI needs to handle
+// specially.
+export interface FitRankingRow extends Totals {
+  fit: string
+  discount_pct: number | null
+}
+
+export interface FitRankingResponse {
+  results: FitRankingRow[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
+export interface FitFilterOptions {
+  financial_years: string[]
+  stores: string[]
+  categories: string[]
+}
+
+export interface FitChartRow extends Totals {
+  label: string
+  discount_pct: number | null
+}
+
+export interface FitSeries {
+  fit: string
+  breakdown: FitChartRow[]
+}
+
+export interface FitChartResponse {
+  granularity: DashboardGranularity
+  series: FitSeries[]
+  brand_code: string | null
+  cache_hit: boolean
+  cached_at: string
+}
+
 export interface UploadConfig {
   brand_code: string
   product_line: string

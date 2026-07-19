@@ -10,6 +10,7 @@ import { CategoriesPage } from './pages/CategoriesPage'
 import { SubcategoriesPage } from './pages/SubcategoriesPage'
 import { ColorsPage } from './pages/ColorsPage'
 import { SizesPage } from './pages/SizesPage'
+import { FitsPage } from './pages/FitsPage'
 import { TrendsPage } from './pages/TrendsPage'
 import { UploadPage } from './pages/UploadPage'
 import { DeleteDataPage } from './pages/DeleteDataPage'
@@ -29,6 +30,7 @@ function App() {
                 <Route path="subcategories" element={<SubcategoriesPage />} />
                 <Route path="colors" element={<ColorsPage />} />
                 <Route path="sizes" element={<SizesPage />} />
+                <Route path="fits" element={<FitsPage />} />
                 <Route path="trends" element={<TrendsPage />} />
                 <Route path="upload" element={<UploadPage />} />
                 <Route path="delete-data" element={<DeleteDataPage />} />
