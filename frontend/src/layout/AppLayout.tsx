@@ -18,7 +18,7 @@ import { OperationsProvider } from '../operations/OperationsContext'
 
 const { Header, Sider, Content } = Layout
 
-// Subcategory/Color/Size read as children of Categories (client
+// Subcategory/Color/Size/Fit read as children of Categories (client
 // feedback) -- a flat, always-visible list with a slight indent, not a
 // collapsible AntD submenu (no click-to-expand needed).
 const childLabel = (text: string) => <span style={{ paddingLeft: 24 }}>{text}</span>
@@ -30,6 +30,7 @@ const NAV_ITEMS = [
   { key: '/subcategories', label: childLabel('Subcategory') },
   { key: '/colors', label: childLabel('Color') },
   { key: '/sizes', label: childLabel('Size') },
+  { key: '/fits', label: childLabel('Fit') },
   { key: '/trends', icon: <LineChartOutlined />, label: 'Trends' },
   { key: '/upload', icon: <UploadOutlined />, label: 'Upload' },
   { key: '/delete-data', icon: <DeleteOutlined />, label: 'Delete Data' },
@@ -107,6 +108,7 @@ export function AppLayout() {
               '/subcategories',
               '/colors',
               '/sizes',
+              '/fits',
             ].includes(location.pathname) && <FilterBar />}
             <Content style={{ margin: 16 }}>
               <Outlet />

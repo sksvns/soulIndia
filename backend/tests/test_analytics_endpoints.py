@@ -358,6 +358,48 @@ def test_sizes_chart_endpoint_returns_per_size_breakdown(loaded_killer_data, dat
 
 
 @pytest.mark.django_db
+def test_fits_endpoint_returns_every_fit_ranked(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/fits/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    fits = {row["fit"] for row in response.data["results"]}
+    assert fits == {"KS-071 F/S SLENDER FIT", "SLIM FIT"}
+
+
+@pytest.mark.django_db
+def test_fits_filter_options_endpoint_returns_real_distinct_values(
+    loaded_killer_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get("/api/analytics/fits/filter-options/", {"brand_code": "KILLER"})
+
+    assert response.status_code == 200
+    assert response.data["financial_years"] == ["23-24"]
+    assert set(response.data["categories"]) == {"SHIRTS", "JEANS"}
+
+
+@pytest.mark.django_db
+def test_fits_chart_endpoint_respects_category_filter(loaded_killer_data, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/analytics/fits/chart/",
+        {
+            "brand_code": "KILLER",
+            "fits": "KS-071 F/S SLENDER FIT,SLIM FIT",
+            "category": "SHIRTS",
+        },
+    )
+
+    assert response.status_code == 200
+    by_fit = {s["fit"]: s["breakdown"] for s in response.data["series"]}
+    assert set(by_fit) == {"KS-071 F/S SLENDER FIT", "SLIM FIT"}
+
+
+@pytest.mark.django_db
 def test_unauthenticated_cannot_read_analytics(loaded_killer_data):
     client = APIClient()
 

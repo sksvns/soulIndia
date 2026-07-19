@@ -805,6 +805,172 @@ def test_size_line_chart_switches_granularity_with_zero_fill(loaded_color_trend_
     assert by_size["L"]["24-25"]["net_value"] == 0  # zero-filled
 
 
+@pytest.fixture
+def loaded_fit_trend_data(killer_brand_and_config, data_inserter_user):
+    """Two fits with different financial-year coverage -- mirrors
+    loaded_color_trend_data's shape exactly (same dates/net values/
+    category), but varies FIT instead of SHADE/SIZE, since neither
+    KILLER_GOOD_ROWS nor KILLER_TREND_ROWS vary fit at all (every row
+    inherits the same FIT from its base row)."""
+    from apps.ingestion.models import UploadBatch
+
+    brand, config = killer_brand_and_config
+    rows = [
+        {
+            **KILLER_GOOD_ROWS[0],
+            "BILL NO \nINVOICE NO": 801,
+            "NEW DATE": date(2023, 4, 5),
+            "MONTH": "APRIL",
+            "F. YEAR": "23-24",
+            "FIT": "SLIM FIT",
+            "MRP": 1000,
+            "QTY \nSALE": 1,
+            "NET \nSALE \nVALUE": 1000,
+            "DISCOUNT \nVALUE": 0,
+            "MRP \nSALE \nVALUE": 1000,
+        },
+        {
+            **KILLER_GOOD_ROWS[0],
+            "BILL NO \nINVOICE NO": 802,
+            "NEW DATE": date(2023, 7, 10),
+            "MONTH": "JULY",
+            "F. YEAR": "23-24",
+            "FIT": "SLIM FIT",
+            "MRP": 2000,
+            "QTY \nSALE": 1,
+            "NET \nSALE \nVALUE": 1800,
+            "DISCOUNT \nVALUE": 200,
+            "MRP \nSALE \nVALUE": 2000,
+        },
+        {
+            **KILLER_GOOD_ROWS[0],
+            "BILL NO \nINVOICE NO": 803,
+            "NEW DATE": date(2023, 10, 15),
+            "MONTH": "OCTOBER",
+            "F. YEAR": "23-24",
+            # Distinct barcode: dim_product resolves fit/category once per
+            # barcode, first-row-wins (dimension_resolver.py) -- reusing
+            # the base row's barcode here would silently keep SLIM FIT.
+            "NEW EAN CODE": 9999999999902,
+            "FIT": "REGULAR FIT",
+            "MRP": 750,
+            "QTY \nSALE": 2,
+            "NET \nSALE \nVALUE": 1500,
+            "DISCOUNT \nVALUE": 0,
+            "MRP \nSALE \nVALUE": 1500,
+        },
+        {
+            **KILLER_GOOD_ROWS[0],
+            "BILL NO \nINVOICE NO": 804,
+            "NEW DATE": date(2024, 4, 20),
+            "MONTH": "APRIL",
+            "F. YEAR": "24-25",
+            "FIT": "SLIM FIT",
+            "MRP": 3000,
+            "QTY \nSALE": 1,
+            "NET \nSALE \nVALUE": 3000,
+            "DISCOUNT \nVALUE": 0,
+            "MRP \nSALE \nVALUE": 3000,
+        },
+    ]
+    batch = UploadBatch.objects.create(
+        brand=brand,
+        config=config,
+        uploaded_by=data_inserter_user,
+        file_name="fit_trend.xlsx",
+        object_key="uploads/killer/menswear/fit_trend.xlsx",
+    )
+    result = run_pipeline(brand, config, killer_workbook(rows), "fit_trend.xlsx")
+    assert result.ok, result.errors
+    load_batch(batch, result.rows)
+    refresh_all()
+    return brand
+
+
+@pytest.mark.django_db
+def test_fit_ranking_reflects_every_fit_and_category_filter(loaded_fit_trend_data):
+    brand = loaded_fit_trend_data
+
+    results = queries.fit_ranking([brand.brand_id], order_by="net")
+    fits = {row["fit"] for row in results}
+    assert fits == {"SLIM FIT", "REGULAR FIT"}
+
+    # All rows here are SHIRTS (base row's MAIN CATEGORY, never overridden).
+    filtered = queries.fit_ranking([brand.brand_id], {"category": "SHIRTS"})
+    assert {row["fit"] for row in filtered} == {"SLIM FIT", "REGULAR FIT"}
+
+    no_match = queries.fit_ranking([brand.brand_id], {"category": "NOSUCHCATEGORY"})
+    assert no_match == []
+
+
+@pytest.mark.django_db
+def test_fit_filter_options_reflects_real_data_only(loaded_fit_trend_data):
+    brand = loaded_fit_trend_data
+
+    options = queries.fit_filter_options([brand.brand_id])
+
+    assert options["financial_years"] == ["23-24", "24-25"]
+    assert options["categories"] == ["SHIRTS"]
+    assert options["stores"] == ["AADARSH ENTERPRISES - DUMRAO"]
+
+
+@pytest.mark.django_db
+def test_fit_line_chart_switches_granularity_with_zero_fill(loaded_fit_trend_data):
+    brand = loaded_fit_trend_data
+
+    result = queries.fit_line_chart([brand.brand_id], {}, ["SLIM FIT", "REGULAR FIT"])
+
+    assert result["granularity"] == "year"
+    by_fit = {s["fit"]: {row["label"]: row for row in s["breakdown"]} for s in result["series"]}
+    assert list(by_fit["SLIM FIT"]) == ["23-24", "24-25"]
+    assert by_fit["SLIM FIT"]["23-24"]["net_value"] == Decimal("2800.00")  # 1000 + 1800
+    assert by_fit["SLIM FIT"]["24-25"]["net_value"] == Decimal("3000.00")
+    assert by_fit["REGULAR FIT"]["23-24"]["net_value"] == Decimal("1500.00")
+    assert by_fit["REGULAR FIT"]["24-25"]["net_value"] == 0  # zero-filled
+    assert by_fit["REGULAR FIT"]["24-25"]["discount_pct"] is None
+
+
+@pytest.mark.django_db
+def test_fit_line_chart_monthly_when_only_year_selected(loaded_fit_trend_data):
+    brand = loaded_fit_trend_data
+
+    result = queries.fit_line_chart(
+        [brand.brand_id], {"financial_year": "23-24"}, ["SLIM FIT", "REGULAR FIT"]
+    )
+
+    assert result["granularity"] == "month"
+    by_fit = {s["fit"]: {row["label"]: row for row in s["breakdown"]} for s in result["series"]}
+    assert list(by_fit["SLIM FIT"]) == ["April", "July", "October"]
+    assert by_fit["SLIM FIT"]["April"]["net_value"] == Decimal("1000.00")
+    assert by_fit["SLIM FIT"]["October"]["net_value"] == 0  # zero-filled
+    assert by_fit["REGULAR FIT"]["October"]["net_value"] == Decimal("1500.00")
+
+
+@pytest.mark.django_db
+def test_fit_line_chart_weekly_when_year_and_month_selected(loaded_fit_trend_data):
+    brand = loaded_fit_trend_data
+
+    result = queries.fit_line_chart(
+        [brand.brand_id], {"financial_year": "23-24", "month": 4}, ["SLIM FIT"]
+    )
+
+    assert result["granularity"] == "week"
+    labels = [row["label"] for row in result["series"][0]["breakdown"]]
+    assert labels == ["Week 1"]
+    assert result["series"][0]["breakdown"][0]["net_value"] == Decimal("1000.00")
+
+
+@pytest.mark.django_db
+def test_fit_ranking_excludes_brands_with_no_fit_data(loaded_killer_data):
+    """Kraus's real export has no FIT column at all -- mv_fit_perf excludes
+    null-fit rows entirely (same as it already does for sub_category), so
+    a brand lacking fit data simply contributes zero rows, not an error."""
+    call_command("seed_brands", stdout=StringIO())
+    kraus = DimBrand.objects.get(brand_code="KRAUS")
+
+    assert queries.fit_ranking([kraus.brand_id]) == []
+
+
 @pytest.mark.django_db
 def test_cache_get_or_compute_is_a_miss_then_a_hit(loaded_killer_data):
     brand = loaded_killer_data

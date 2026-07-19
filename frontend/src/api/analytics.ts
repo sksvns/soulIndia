@@ -11,6 +11,9 @@ import type {
   DashboardSummary,
   FilterAttribute,
   Filters,
+  FitChartResponse,
+  FitFilterOptions,
+  FitRankingResponse,
   OrderBy,
   PageSize,
   PaginatedAnalyticsResponse,
@@ -267,6 +270,50 @@ export async function fetchSizeLineChart(
     params: {
       brand_code: brandCode,
       sizes: sizes.join(','),
+      ...filters,
+      refresh: refresh || undefined,
+    },
+  })
+  return data
+}
+
+// Fit: same conventions as Color/Size.
+export async function fetchFitRanking(
+  brandCode: string | undefined,
+  filters: Filters,
+  orderBy: OrderBy,
+  refresh = false,
+): Promise<FitRankingResponse> {
+  const { data } = await apiClient.get<FitRankingResponse>('/analytics/fits/', {
+    params: {
+      brand_code: brandCode,
+      order_by: orderBy,
+      ...filters,
+      refresh: refresh || undefined,
+    },
+  })
+  return data
+}
+
+export async function fetchFitFilterOptions(
+  brandCode: string | undefined,
+): Promise<FitFilterOptions> {
+  const { data } = await apiClient.get<FitFilterOptions>('/analytics/fits/filter-options/', {
+    params: { brand_code: brandCode },
+  })
+  return data
+}
+
+export async function fetchFitLineChart(
+  brandCode: string | undefined,
+  filters: Filters,
+  fits: string[],
+  refresh = false,
+): Promise<FitChartResponse> {
+  const { data } = await apiClient.get<FitChartResponse>('/analytics/fits/chart/', {
+    params: {
+      brand_code: brandCode,
+      fits: fits.join(','),
       ...filters,
       refresh: refresh || undefined,
     },

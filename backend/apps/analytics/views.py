@@ -679,6 +679,99 @@ class SizeLineChartView(APIView):
         )
 
 
+class FitPerfView(APIView):
+    """Every fit matching the filters, ranked by net/mrp/quantity/
+    discount_pct -- same conventions as ColorPerfView. Kraus never
+    contributes any rows here (no FIT column in its real export), same as
+    it already doesn't for Subcategory -- not an error, just an empty
+    contribution."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, ORDER_BY_PARAM, REFRESH_PARAM])
+    def get(self, request):
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
+        filters = _parse_filters(request)
+        order_by = request.query_params.get("order_by", "net")
+        cache_filters = {**filters, "order_by": order_by}
+
+        def compute():
+            return queries.fit_ranking(brand_ids, filters, order_by)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "fit_ranking",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
+        return Response(
+            {
+                "results": data,
+                "brand_code": brand_code,
+                "cache_hit": cache_hit,
+                "cached_at": cached_at,
+            }
+        )
+
+
+class FitFilterOptionsView(APIView):
+    """Distinct financial years/store names/categories for the Fit
+    page's filter bar -- same convention as ColorFilterOptionsView."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[OPTIONAL_BRAND_CODE_PARAM])
+    def get(self, request):
+        brand_ids, _ = _resolve_optional_brand_ids(request)
+        return Response(queries.fit_filter_options(brand_ids))
+
+
+FITS_PARAM = OpenApiParameter(
+    "fits", str, description="comma-separated fit names to chart", required=True
+)
+
+
+class FitLineChartView(APIView):
+    """Each requested fit's own MRP/Net/Discount/Quantity broken down at
+    a granularity that adapts to the filter selection -- same as
+    ColorLineChartView."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(parameters=[*OPTIONAL_BRAND_FILTER_PARAMS, FITS_PARAM, REFRESH_PARAM])
+    def get(self, request):
+        brand_ids, brand_code = _resolve_optional_brand_ids(request)
+        filters = _parse_filters(request)
+        fits_param = request.query_params.get("fits", "")
+        fits = [c for c in fits_param.split(",") if c]
+        cache_filters = {**filters, "fits": fits}
+
+        def compute():
+            return queries.fit_line_chart(brand_ids, filters, fits)
+
+        if brand_code:
+            data, cache_hit, cached_at = cache.get_or_compute(
+                brand_ids[0],
+                "fit_line_chart",
+                cache_filters,
+                compute,
+                force_refresh=_force_refresh(request),
+            )
+        else:
+            data = compute()
+            cache_hit = False
+            cached_at = timezone.now().isoformat()
+        return Response(
+            {**data, "brand_code": brand_code, "cache_hit": cache_hit, "cached_at": cached_at}
+        )
+
+
 def _validate_trend_params(request):
     dimension = request.query_params.get("dimension", "month")
     metric = request.query_params.get("metric", "net")

@@ -17,8 +17,9 @@ to brand_id before reaching the filter engine (apps.analytics.views), never
 optional like the rest of these.
 
 color/size are now supported too (mv_color_perf/mv_size_perf, migration
-0005) -- fit/article_code remain deliberately unsupported for the same
-cardinality reasons migration 0002 originally gave for all four.
+0005), and fit as of migration 0006 -- article_code remains deliberately
+unsupported for the same cardinality reasons migration 0002 originally
+gave for all four.
 """
 
 MV_COLUMNS = {
@@ -83,12 +84,21 @@ MV_COLUMNS = {
         "financial_year": "financial_year",
         "month": "month_no",
     },
+    # Purpose-built for the Fit page (migration 0006) -- same reasoning as
+    # mv_color_perf/mv_size_perf above.
+    "mv_fit_perf": {
+        "store": "store_name",
+        "category": "category",
+        "fit": "fit",
+        "financial_year": "financial_year",
+        "month": "month_no",
+    },
     # Not a materialized view -- the one deliberate exception (see
     # queries._dashboard_weekly_breakdown's docstring). financial_year/month
     # aren't listed here because that query pins those via dim_calendar
     # directly rather than through this generic filter engine; this entry
     # only covers the filters that can still narrow a single brand-month
-    # further (category/sub_category/color/size/store), joined in from
+    # further (category/sub_category/color/size/fit/store), joined in from
     # dim_product/dim_store. store filters by name for the same reason as
     # dashboard_category_perf above.
     "fact_sales": {
@@ -98,6 +108,7 @@ MV_COLUMNS = {
         "gender": "p.gender",
         "color": "p.color",
         "size": "p.size",
+        "fit": "p.fit",
     },
 }
 
