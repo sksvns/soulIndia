@@ -6,7 +6,12 @@ from unittest.mock import patch
 import pytest
 from django.core.management import call_command
 
-from apps.ingestion.loader import DataAlterationNotPermitted, delete_by_filter, preview_delete
+from apps.ingestion.loader import (
+    DataAlterationNotPermitted,
+    delete_by_filter,
+    months_with_data,
+    preview_delete,
+)
 from apps.ingestion.models import DataAlterationAudit, FactSales, UploadBatch
 from apps.ingestion.pipeline import run_pipeline
 from apps.masterdata.models import BrandUploadConfig, DimBrand
@@ -50,7 +55,7 @@ def test_delete_by_filter_removes_all_matching_rows_and_returns_count(
     _load(brand, config, super_admin_user, KILLER_GOOD_ROWS)  # all April 2023, FY 23-24
     assert FactSales.objects.filter(brand=brand).count() == 3
 
-    deleted = delete_by_filter(brand, "menswear", "23-24", 4, super_admin_user)
+    deleted = delete_by_filter(brand, "menswear", "23-24", [4], super_admin_user)
 
     assert deleted == 3
     assert not FactSales.objects.filter(brand=brand).exists()
@@ -69,7 +74,7 @@ def test_delete_by_filter_does_not_touch_a_different_month(
     _load(brand, config, super_admin_user, march_rows, "march.xlsx")
     assert FactSales.objects.filter(brand=brand).count() == 2
 
-    deleted = delete_by_filter(brand, "menswear", "23-24", 4, super_admin_user)
+    deleted = delete_by_filter(brand, "menswear", "23-24", [4], super_admin_user)
 
     assert deleted == 1
     remaining = FactSales.objects.get(brand=brand)
@@ -103,7 +108,7 @@ def test_delete_by_filter_does_not_touch_a_different_brand(
     load_batch(jk_batch, jk_result.rows)
     assert FactSales.objects.filter(brand=jk_brand).exists()
 
-    delete_by_filter(brand, "menswear", "23-24", 4, super_admin_user)
+    delete_by_filter(brand, "menswear", "23-24", [4], super_admin_user)
 
     assert not FactSales.objects.filter(brand=brand).exists()
     assert FactSales.objects.filter(brand=jk_brand).exists()  # untouched
@@ -139,7 +144,7 @@ def test_delete_by_filter_scopes_by_product_line_not_just_brand(
     _load(brand, footwear_config, super_admin_user, footwear_rows, "footwear.xlsx")
     assert FactSales.objects.filter(brand=brand).count() == 4
 
-    deleted = delete_by_filter(brand, "menswear", "23-24", 4, super_admin_user)
+    deleted = delete_by_filter(brand, "menswear", "23-24", [4], super_admin_user)
 
     assert deleted == 3
     remaining = FactSales.objects.filter(brand=brand)
@@ -154,7 +159,7 @@ def test_preview_delete_matches_what_delete_by_filter_actually_removes(
     brand, config = killer_brand_and_config
     _load(brand, config, super_admin_user, KILLER_GOOD_ROWS)
 
-    preview = preview_delete(brand, "menswear", "23-24", 4)
+    preview = preview_delete(brand, "menswear", "23-24", [4])
 
     assert preview["row_count"] == 3
     assert preview["store_count"] == 1
@@ -162,7 +167,7 @@ def test_preview_delete_matches_what_delete_by_filter_actually_removes(
     assert preview["min_date"] == date(2023, 4, 5)
     assert preview["max_date"] == date(2023, 4, 26)
 
-    deleted = delete_by_filter(brand, "menswear", "23-24", 4, super_admin_user)
+    deleted = delete_by_filter(brand, "menswear", "23-24", [4], super_admin_user)
     assert deleted == preview["row_count"]
 
 
@@ -172,7 +177,7 @@ def test_preview_delete_returns_zero_row_count_and_null_aggregates_for_no_match(
 ):
     brand, config = killer_brand_and_config
 
-    preview = preview_delete(brand, "menswear", "23-24", 4)
+    preview = preview_delete(brand, "menswear", "23-24", [4])
 
     assert preview["row_count"] == 0
     assert preview["store_count"] == 0
@@ -190,7 +195,7 @@ def test_delete_by_filter_with_zero_matches_returns_zero_and_creates_no_audit(
     raise even for a user without Super Admin access."""
     brand, config = killer_brand_and_config
 
-    deleted = delete_by_filter(brand, "menswear", "23-24", 4, data_inserter_user)
+    deleted = delete_by_filter(brand, "menswear", "23-24", [4], data_inserter_user)
 
     assert deleted == 0
     assert DataAlterationAudit.objects.count() == 0
@@ -204,7 +209,7 @@ def test_data_inserter_is_blocked_from_delete_by_filter_and_it_is_audited(
     _load(brand, config, data_inserter_user, KILLER_GOOD_ROWS)
 
     with pytest.raises(DataAlterationNotPermitted, match="requires Super Admin access"):
-        delete_by_filter(brand, "menswear", "23-24", 4, data_inserter_user)
+        delete_by_filter(brand, "menswear", "23-24", [4], data_inserter_user)
 
     assert FactSales.objects.filter(brand=brand).count() == 3  # untouched
     audit = DataAlterationAudit.objects.get()
@@ -213,7 +218,7 @@ def test_data_inserter_is_blocked_from_delete_by_filter_and_it_is_audited(
     assert audit.action == DataAlterationAudit.Action.DELETE_FILTERED
     assert audit.details["product_line"] == "menswear"
     assert audit.details["financial_year"] == "23-24"
-    assert audit.details["month_no"] == 4
+    assert audit.details["months"] == [4]
     assert audit.details["row_count"] == 3
 
 
@@ -224,7 +229,7 @@ def test_super_admin_can_delete_by_filter_and_it_is_audited(
     brand, config = killer_brand_and_config
     _load(brand, config, super_admin_user, KILLER_GOOD_ROWS)
 
-    deleted = delete_by_filter(brand, "menswear", "23-24", 4, super_admin_user)
+    deleted = delete_by_filter(brand, "menswear", "23-24", [4], super_admin_user)
 
     assert deleted == 3
     audit = DataAlterationAudit.objects.get()
@@ -245,7 +250,7 @@ def test_delete_by_filter_refreshes_materialized_views_and_busts_cache(
         patch("apps.ingestion.loader.refresh_all") as mock_refresh,
         patch("apps.ingestion.loader.analytics_cache.bust") as mock_bust,
     ):
-        delete_by_filter(brand, "menswear", "23-24", 4, super_admin_user)
+        delete_by_filter(brand, "menswear", "23-24", [4], super_admin_user)
 
     mock_refresh.assert_called_once()
     mock_bust.assert_called_once_with(brand.brand_id)
@@ -261,7 +266,7 @@ def test_delete_by_filter_with_zero_matches_does_not_refresh_or_bust_cache(
         patch("apps.ingestion.loader.refresh_all") as mock_refresh,
         patch("apps.ingestion.loader.analytics_cache.bust") as mock_bust,
     ):
-        delete_by_filter(brand, "menswear", "23-24", 4, super_admin_user)
+        delete_by_filter(brand, "menswear", "23-24", [4], super_admin_user)
 
     mock_refresh.assert_not_called()
     mock_bust.assert_not_called()
@@ -288,3 +293,100 @@ def test_rollback_batch_now_refreshes_materialized_views_and_busts_cache(
 
     mock_refresh.assert_called_once()
     mock_bust.assert_called_once_with(brand.brand_id)
+
+
+# --- Multi-month delete (client feedback: pick a brand + year, tick ------
+# several months with data, delete all in one pass) -----------------------
+
+
+@pytest.mark.django_db
+def test_months_with_data_lists_every_month_that_has_rows(
+    killer_brand_and_config, super_admin_user
+):
+    brand, config = killer_brand_and_config
+    april_rows = [{**KILLER_GOOD_ROWS[0], "BILL NO \nINVOICE NO": 1}]
+    # FY 23-24 runs April 2023 - March 2024, so "March of FY 23-24" is
+    # calendar March 2024, not March 2023 (that's FY 22-23).
+    march_rows = [
+        {**KILLER_GOOD_ROWS[0], "NEW DATE": date(2024, 3, 25), "BILL NO \nINVOICE NO": 2}
+    ]
+    _load(brand, config, super_admin_user, april_rows, "april.xlsx")
+    _load(brand, config, super_admin_user, march_rows, "march.xlsx")
+
+    months = months_with_data(brand, "menswear", "23-24")
+
+    by_month = {m["date__month_no"]: m for m in months}
+    assert set(by_month) == {3, 4}
+    assert by_month[3]["row_count"] == 1
+    assert by_month[3]["quantity"] == 1
+    assert by_month[3]["date__month_name"] == "March"
+    assert by_month[4]["row_count"] == 1
+
+
+@pytest.mark.django_db
+def test_months_with_data_is_empty_for_a_year_with_no_data(killer_brand_and_config):
+    brand, config = killer_brand_and_config
+
+    assert months_with_data(brand, "menswear", "23-24") == []
+
+
+@pytest.mark.django_db
+def test_delete_by_filter_removes_several_selected_months_leaves_others(
+    killer_brand_and_config, super_admin_user
+):
+    brand, config = killer_brand_and_config
+    april_rows = [{**KILLER_GOOD_ROWS[0], "BILL NO \nINVOICE NO": 1}]
+    march_rows = [
+        {**KILLER_GOOD_ROWS[0], "NEW DATE": date(2024, 3, 25), "BILL NO \nINVOICE NO": 2}
+    ]
+    may_rows = [{**KILLER_GOOD_ROWS[0], "NEW DATE": date(2023, 5, 10), "BILL NO \nINVOICE NO": 3}]
+    _load(brand, config, super_admin_user, april_rows, "april.xlsx")
+    _load(brand, config, super_admin_user, march_rows, "march.xlsx")
+    _load(brand, config, super_admin_user, may_rows, "may.xlsx")
+    assert FactSales.objects.filter(brand=brand).count() == 3
+
+    deleted = delete_by_filter(brand, "menswear", "23-24", [3, 4], super_admin_user)
+
+    assert deleted == 2
+    remaining = FactSales.objects.get(brand=brand)
+    assert remaining.sale_date == date(2023, 5, 10)
+
+
+@pytest.mark.django_db
+def test_preview_delete_combines_totals_across_several_selected_months(
+    killer_brand_and_config, super_admin_user
+):
+    brand, config = killer_brand_and_config
+    april_rows = [{**KILLER_GOOD_ROWS[0], "BILL NO \nINVOICE NO": 1}]
+    march_rows = [
+        {**KILLER_GOOD_ROWS[0], "NEW DATE": date(2024, 3, 25), "BILL NO \nINVOICE NO": 2}
+    ]
+    _load(brand, config, super_admin_user, april_rows, "april.xlsx")
+    _load(brand, config, super_admin_user, march_rows, "march.xlsx")
+
+    preview = preview_delete(brand, "menswear", "23-24", [3, 4])
+
+    assert preview["row_count"] == 2
+    assert preview["total_net_value"] == Decimal("4248.00")  # 2124.00 * 2
+    assert preview["min_date"] == date(2023, 4, 5)
+    assert preview["max_date"] == date(2024, 3, 25)
+
+
+@pytest.mark.django_db
+def test_multi_month_delete_is_audited_once_for_the_whole_selection(
+    killer_brand_and_config, super_admin_user
+):
+    brand, config = killer_brand_and_config
+    april_rows = [{**KILLER_GOOD_ROWS[0], "BILL NO \nINVOICE NO": 1}]
+    march_rows = [
+        {**KILLER_GOOD_ROWS[0], "NEW DATE": date(2024, 3, 25), "BILL NO \nINVOICE NO": 2}
+    ]
+    _load(brand, config, super_admin_user, april_rows, "april.xlsx")
+    _load(brand, config, super_admin_user, march_rows, "march.xlsx")
+
+    deleted = delete_by_filter(brand, "menswear", "23-24", [3, 4], super_admin_user)
+
+    assert deleted == 2
+    audit = DataAlterationAudit.objects.get()  # exactly one record, not one per month
+    assert audit.details["months"] == [3, 4]
+    assert audit.details["row_count"] == 2

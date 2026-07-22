@@ -357,10 +357,10 @@ export interface UploadBatch {
   created_at: string
 }
 
-// Delete Data page: brand + product_line + financial_year + month is the
-// full selection (no store filter -- deletes across every store for that
-// brand/product_line/period). Preview always reflects exactly what a
-// delete would remove (backend shares one query for both).
+// Delete Data page: brand + product_line + financial_year + one or more
+// months is the full selection (no store filter -- deletes across every
+// store for that brand/product_line/period). Preview always reflects
+// exactly what a delete would remove (backend shares one query for both).
 export interface DeletePreview {
   row_count: number
   store_count: number
@@ -371,4 +371,14 @@ export interface DeletePreview {
 
 export interface DeleteResult {
   deleted_count: number
+}
+
+// One row in the Delete Data page's month checklist (client feedback:
+// pick a brand + year, see every month that actually has data and how
+// much, tick however many to delete in one pass).
+export interface MonthWithData {
+  month_no: number
+  month_name: string
+  row_count: number
+  quantity: number
 }
