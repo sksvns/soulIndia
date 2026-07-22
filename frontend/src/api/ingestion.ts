@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { DeletePreview, DeleteResult, UploadBatch } from '../types'
+import type { DeletePreview, DeleteResult, MonthWithData, UploadBatch } from '../types'
 
 export async function uploadFile(
   file: File,
@@ -33,7 +33,26 @@ export interface DeleteTarget {
   brandCode: string
   productLine: string
   financialYear: string
-  month: number
+  months: number[]
+}
+
+export interface MonthsWithDataTarget {
+  brandCode: string
+  productLine: string
+  financialYear: string
+}
+
+export async function fetchMonthsWithData(
+  target: MonthsWithDataTarget,
+): Promise<MonthWithData[]> {
+  const { data } = await apiClient.get<{ months: MonthWithData[] }>('/ingestion/delete-months/', {
+    params: {
+      brand_code: target.brandCode,
+      product_line: target.productLine,
+      financial_year: target.financialYear,
+    },
+  })
+  return data.months
 }
 
 export async function fetchDeletePreview(target: DeleteTarget): Promise<DeletePreview> {
@@ -42,7 +61,7 @@ export async function fetchDeletePreview(target: DeleteTarget): Promise<DeletePr
       brand_code: target.brandCode,
       product_line: target.productLine,
       financial_year: target.financialYear,
-      month: target.month,
+      months: target.months.join(','),
     },
   })
   return data
@@ -53,7 +72,7 @@ export async function deleteData(target: DeleteTarget): Promise<DeleteResult> {
     brand_code: target.brandCode,
     product_line: target.productLine,
     financial_year: target.financialYear,
-    month: target.month,
+    months: target.months.join(','),
   })
   return data
 }

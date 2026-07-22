@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from io import StringIO
 
@@ -27,18 +28,58 @@ def _authed_client(user):
     return client
 
 
-def _load_killer_good_rows(brand, config, user):
-    result = run_pipeline(brand, config, killer_workbook(KILLER_GOOD_ROWS), "test.xlsx")
+def _load_rows(brand, config, user, rows, filename="test.xlsx"):
+    result = run_pipeline(brand, config, killer_workbook(rows), filename)
     assert result.ok, result.errors
     batch = UploadBatch.objects.create(
         brand=brand,
         config=config,
         uploaded_by=user,
-        file_name="test.xlsx",
-        object_key="uploads/killer/menswear/test.xlsx",
+        file_name=filename,
+        object_key=f"uploads/killer/menswear/{filename}",
     )
     load_batch(batch, result.rows)
     return batch
+
+
+def _load_killer_good_rows(brand, config, user):
+    return _load_rows(brand, config, user, KILLER_GOOD_ROWS)
+
+
+@pytest.mark.django_db
+def test_months_with_data_endpoint_lists_months_and_quantities(
+    killer_brand_and_config, data_inserter_user
+):
+    brand, config = killer_brand_and_config
+    _load_killer_good_rows(brand, config, data_inserter_user)
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/ingestion/delete-months/",
+        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "23-24"},
+    )
+
+    assert response.status_code == 200
+    months = response.data["months"]
+    assert len(months) == 1
+    assert months[0]["month_no"] == 4
+    assert months[0]["month_name"] == "April"
+    assert months[0]["row_count"] == 3
+
+
+@pytest.mark.django_db
+def test_months_with_data_endpoint_returns_empty_list_for_no_data(
+    killer_brand_and_config, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/ingestion/delete-months/",
+        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "23-24"},
+    )
+
+    assert response.status_code == 200
+    assert response.data["months"] == []
 
 
 @pytest.mark.django_db
@@ -51,7 +92,12 @@ def test_preview_endpoint_returns_summary_of_matching_data(
 
     response = client.get(
         "/api/ingestion/delete-preview/",
-        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "23-24", "month": 4},
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "23-24",
+            "months": "4",
+        },
     )
 
     assert response.status_code == 200
@@ -61,12 +107,46 @@ def test_preview_endpoint_returns_summary_of_matching_data(
 
 
 @pytest.mark.django_db
+def test_preview_endpoint_combines_several_selected_months(
+    killer_brand_and_config, data_inserter_user
+):
+    brand, config = killer_brand_and_config
+    april_rows = [{**KILLER_GOOD_ROWS[0], "BILL NO \nINVOICE NO": 1}]
+    # FY 23-24 is April 2023 - March 2024, so "March of FY 23-24" is
+    # calendar March 2024.
+    march_rows = [
+        {**KILLER_GOOD_ROWS[0], "NEW DATE": date(2024, 3, 25), "BILL NO \nINVOICE NO": 2}
+    ]
+    _load_rows(brand, config, data_inserter_user, april_rows, "april.xlsx")
+    _load_rows(brand, config, data_inserter_user, march_rows, "march.xlsx")
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/ingestion/delete-preview/",
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "23-24",
+            "months": "3,4",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.data["row_count"] == 2
+
+
+@pytest.mark.django_db
 def test_preview_endpoint_returns_zero_for_no_match(killer_brand_and_config, data_inserter_user):
     client = _authed_client(data_inserter_user)
 
     response = client.get(
         "/api/ingestion/delete-preview/",
-        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "23-24", "month": 4},
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "23-24",
+            "months": "4",
+        },
     )
 
     assert response.status_code == 200
@@ -82,7 +162,12 @@ def test_preview_endpoint_rejects_malformed_financial_year(
 
     response = client.get(
         "/api/ingestion/delete-preview/",
-        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "2023", "month": 4},
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "2023",
+            "months": "4",
+        },
     )
 
     assert response.status_code == 400
@@ -98,8 +183,37 @@ def test_preview_endpoint_rejects_out_of_range_month(killer_brand_and_config, da
             "brand_code": "KILLER",
             "product_line": "menswear",
             "financial_year": "23-24",
-            "month": 13,
+            "months": "13",
         },
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_preview_endpoint_rejects_non_numeric_month(killer_brand_and_config, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/ingestion/delete-preview/",
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "23-24",
+            "months": "abc",
+        },
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_preview_endpoint_rejects_missing_months(killer_brand_and_config, data_inserter_user):
+    client = _authed_client(data_inserter_user)
+
+    response = client.get(
+        "/api/ingestion/delete-preview/",
+        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "23-24"},
     )
 
     assert response.status_code == 400
@@ -115,7 +229,7 @@ def test_preview_endpoint_404s_for_unknown_brand(killer_brand_and_config, data_i
             "brand_code": "NOPE",
             "product_line": "menswear",
             "financial_year": "23-24",
-            "month": 4,
+            "months": "4",
         },
     )
 
@@ -132,7 +246,12 @@ def test_delete_endpoint_rejects_data_inserter_and_data_survives(
 
     response = client.post(
         "/api/ingestion/delete/",
-        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "23-24", "month": 4},
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "23-24",
+            "months": "4",
+        },
         format="json",
     )
 
@@ -153,7 +272,12 @@ def test_delete_endpoint_accepts_super_admin_and_removes_data(
 
     response = client.post(
         "/api/ingestion/delete/",
-        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "23-24", "month": 4},
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "23-24",
+            "months": "4",
+        },
         format="json",
     )
 
@@ -163,6 +287,41 @@ def test_delete_endpoint_accepts_super_admin_and_removes_data(
     audit = DataAlterationAudit.objects.get()
     assert audit.allowed is True
     assert audit.action == DataAlterationAudit.Action.DELETE_FILTERED
+
+
+@pytest.mark.django_db
+def test_delete_endpoint_removes_several_selected_months_in_one_request(
+    killer_brand_and_config, super_admin_user
+):
+    brand, config = killer_brand_and_config
+    april_rows = [{**KILLER_GOOD_ROWS[0], "BILL NO \nINVOICE NO": 1}]
+    march_rows = [
+        {**KILLER_GOOD_ROWS[0], "NEW DATE": date(2024, 3, 25), "BILL NO \nINVOICE NO": 2}
+    ]
+    may_rows = [{**KILLER_GOOD_ROWS[0], "NEW DATE": date(2023, 5, 10), "BILL NO \nINVOICE NO": 3}]
+    _load_rows(brand, config, super_admin_user, april_rows, "april.xlsx")
+    _load_rows(brand, config, super_admin_user, march_rows, "march.xlsx")
+    _load_rows(brand, config, super_admin_user, may_rows, "may.xlsx")
+    client = _authed_client(super_admin_user)
+
+    response = client.post(
+        "/api/ingestion/delete/",
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "23-24",
+            "months": "3,4",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["deleted_count"] == 2
+    remaining = FactSales.objects.get(brand=brand)
+    assert remaining.sale_date == date(2023, 5, 10)
+    # One audit record for the whole request, not one per month.
+    audit = DataAlterationAudit.objects.get()
+    assert audit.details["months"] == [3, 4]
 
 
 @pytest.mark.django_db
@@ -177,7 +336,7 @@ def test_delete_endpoint_404s_for_unknown_product_line(
             "brand_code": "KILLER",
             "product_line": "does-not-exist",
             "financial_year": "23-24",
-            "month": 4,
+            "months": "4",
         },
         format="json",
     )
@@ -191,11 +350,21 @@ def test_unauthenticated_cannot_preview_or_delete(killer_brand_and_config):
 
     preview_response = client.get(
         "/api/ingestion/delete-preview/",
-        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "23-24", "month": 4},
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "23-24",
+            "months": "4",
+        },
     )
     delete_response = client.post(
         "/api/ingestion/delete/",
-        {"brand_code": "KILLER", "product_line": "menswear", "financial_year": "23-24", "month": 4},
+        {
+            "brand_code": "KILLER",
+            "product_line": "menswear",
+            "financial_year": "23-24",
+            "months": "4",
+        },
         format="json",
     )
 

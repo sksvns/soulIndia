@@ -1,33 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Modal, Select, Space } from 'antd'
+import { Alert, Button, Card, Descriptions, Modal, Select, Space, Table } from 'antd'
 import { DeleteOutlined, ExclamationCircleFilled } from '@ant-design/icons'
 import { isAxiosError } from 'axios'
 import { fetchDashboardFilterOptions } from '../api/analytics'
-import { fetchDeletePreview } from '../api/ingestion'
+import { fetchDeletePreview, fetchMonthsWithData } from '../api/ingestion'
 import { fetchUploadConfigs } from '../api/masterdata'
 import { useAuth } from '../auth/AuthContext'
 import { useOperations } from '../operations/OperationsContext'
-import { formatINR } from '../utils/format'
-import type { DeletePreview, UploadConfig } from '../types'
-
-const MONTH_OPTIONS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-].map((name, i) => ({ label: name, value: i + 1 }))
-
-function monthLabel(month: number | undefined): string {
-  return MONTH_OPTIONS.find((m) => m.value === month)?.label ?? ''
-}
+import { formatINR, formatNumber } from '../utils/format'
+import type { DeletePreview, MonthWithData, UploadConfig } from '../types'
 
 export function DeleteDataPage() {
   const { hasPermission } = useAuth()
@@ -41,7 +22,12 @@ export function DeleteDataPage() {
   const [productLine, setProductLine] = useState<string | undefined>(undefined)
   const [financialYearOptions, setFinancialYearOptions] = useState<string[]>([])
   const [financialYear, setFinancialYear] = useState<string | undefined>(undefined)
-  const [month, setMonth] = useState<number | undefined>(undefined)
+
+  const [months, setMonths] = useState<MonthWithData[]>([])
+  const [monthsLoading, setMonthsLoading] = useState(false)
+  const [monthsError, setMonthsError] = useState<string | null>(null)
+  const [selectedMonths, setSelectedMonths] = useState<number[]>([])
+
   const [preview, setPreview] = useState<DeletePreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -60,14 +46,33 @@ export function DeleteDataPage() {
     )
   }, [brandCode])
 
+  // Every month with data for this brand/product line/year, with its own
+  // row count and quantity -- client feedback: pick a brand and year, see
+  // every month that actually has data, tick however many to delete in one
+  // pass, not one month at a time.
+  const loadMonths = () => {
+    setMonths([])
+    setSelectedMonths([])
+    setMonthsError(null)
+    if (!brandCode || !productLine || !financialYear) return
+
+    setMonthsLoading(true)
+    fetchMonthsWithData({ brandCode, productLine, financialYear })
+      .then(setMonths)
+      .catch(() => setMonthsError('Could not load months for this selection.'))
+      .finally(() => setMonthsLoading(false))
+  }
+
+  useEffect(loadMonths, [brandCode, productLine, financialYear])
+
   useEffect(() => {
     setPreview(null)
     setPreviewError(null)
-    if (!brandCode || !productLine || !financialYear || !month) return
+    if (!brandCode || !productLine || !financialYear || selectedMonths.length === 0) return
 
     let cancelled = false
     setPreviewLoading(true)
-    fetchDeletePreview({ brandCode, productLine, financialYear, month })
+    fetchDeletePreview({ brandCode, productLine, financialYear, months: selectedMonths })
       .then((data) => {
         if (!cancelled) setPreview(data)
       })
@@ -82,7 +87,7 @@ export function DeleteDataPage() {
     return () => {
       cancelled = true
     }
-  }, [brandCode, productLine, financialYear, month])
+  }, [brandCode, productLine, financialYear, selectedMonths])
 
   const brandOptions = [...new Map(configs.map((c) => [c.brand_code, c.brand_code])).keys()].map(
     (code) => ({ label: code, value: code }),
@@ -91,9 +96,15 @@ export function DeleteDataPage() {
     .filter((c) => c.brand_code === brandCode)
     .map((c) => ({ label: c.product_line, value: c.product_line }))
 
+  const selectedMonthNames = months
+    .filter((m) => selectedMonths.includes(m.month_no))
+    .map((m) => m.month_name)
+
   const handleDeleteClick = () => {
-    if (!brandCode || !productLine || !financialYear || !month || !preview) return
-    const target = { brandCode, productLine, financialYear, month }
+    if (!brandCode || !productLine || !financialYear || selectedMonths.length === 0 || !preview) {
+      return
+    }
+    const target = { brandCode, productLine, financialYear, months: selectedMonths }
 
     Modal.confirm({
       title: 'Permanently delete this data?',
@@ -107,8 +118,8 @@ export function DeleteDataPage() {
           <p>
             This will permanently delete <strong>{preview.row_count.toLocaleString()}</strong>{' '}
             sales row(s) for <strong>{brandCode} / {productLine}</strong>, FY{' '}
-            <strong>{financialYear}</strong>, <strong>{monthLabel(month)}</strong>, across{' '}
-            <strong>{preview.store_count}</strong> store(s)
+            <strong>{financialYear}</strong>, <strong>{selectedMonthNames.join(', ')}</strong>,
+            across <strong>{preview.store_count}</strong> store(s)
             {preview.total_net_value !== null && (
               <> (net value {formatINR(preview.total_net_value)})</>
             )}
@@ -123,8 +134,7 @@ export function DeleteDataPage() {
         try {
           await startDelete(target)
           setPreview(null)
-          setFinancialYear(undefined)
-          setMonth(undefined)
+          loadMonths()
         } catch {
           // failure toast already shown by startDelete -- let the dialog
           // close either way rather than getting stuck open on it.
@@ -149,7 +159,7 @@ export function DeleteDataPage() {
         <Alert
           type="warning"
           showIcon
-          title="This permanently removes sales data from every store for the selected brand, product line, financial year and month. There is no undo."
+          title="This permanently removes sales data from every store for the selected brand, product line, financial year and month(s). There is no undo."
         />
 
         <Space wrap>
@@ -162,7 +172,6 @@ export function DeleteDataPage() {
                 setBrandCode(v)
                 setProductLine(undefined)
                 setFinancialYear(undefined)
-                setMonth(undefined)
               }}
               options={brandOptions}
             />
@@ -175,7 +184,6 @@ export function DeleteDataPage() {
               onChange={(v) => {
                 setProductLine(v)
                 setFinancialYear(undefined)
-                setMonth(undefined)
               }}
               disabled={!brandCode}
               options={productLineOptions}
@@ -186,31 +194,45 @@ export function DeleteDataPage() {
               style={{ width: 160 }}
               placeholder="Financial year"
               value={financialYear}
-              onChange={(v) => {
-                setFinancialYear(v)
-                setMonth(undefined)
-              }}
+              onChange={setFinancialYear}
               disabled={!productLine}
               options={financialYearOptions.map((fy) => ({ label: fy, value: fy }))}
             />
           </div>
-          <div data-testid="month-select">
-            <Select
-              style={{ width: 160 }}
-              placeholder="Month"
-              value={month}
-              onChange={setMonth}
-              disabled={!financialYear}
-              options={MONTH_OPTIONS}
-            />
-          </div>
         </Space>
+
+        {monthsError && <Alert type="error" title={monthsError} showIcon />}
+
+        {financialYear && !monthsError && (
+          <Table<MonthWithData>
+            size="small"
+            loading={monthsLoading}
+            dataSource={months}
+            rowKey="month_no"
+            pagination={false}
+            locale={{ emptyText: 'No data for this brand/product line/year.' }}
+            rowSelection={{
+              selectedRowKeys: selectedMonths,
+              onChange: (keys) => setSelectedMonths(keys as number[]),
+            }}
+            columns={[
+              { title: 'Month', dataIndex: 'month_name' },
+              {
+                title: 'Quantity',
+                dataIndex: 'quantity',
+                align: 'right',
+                render: (v: number) => formatNumber(v),
+              },
+            ]}
+          />
+        )}
 
         {previewError && <Alert type="error" title={previewError} showIcon />}
 
         {preview && (
           <Card size="small" title="What this will delete" loading={previewLoading}>
             <Descriptions column={1} size="small">
+              <Descriptions.Item label="Months">{selectedMonthNames.join(', ')}</Descriptions.Item>
               <Descriptions.Item label="Rows">
                 {preview.row_count.toLocaleString()}
               </Descriptions.Item>
@@ -227,16 +249,21 @@ export function DeleteDataPage() {
           </Card>
         )}
 
-        <Button
-          danger
-          type="primary"
-          icon={<DeleteOutlined />}
-          disabled={!preview || preview.row_count === 0}
-          loading={deleting}
-          onClick={handleDeleteClick}
-        >
-          Delete
-        </Button>
+        <Space>
+          <Button
+            danger
+            type="primary"
+            icon={<DeleteOutlined />}
+            disabled={selectedMonths.length === 0 || !preview || preview.row_count === 0}
+            loading={deleting}
+            onClick={handleDeleteClick}
+          >
+            Delete
+          </Button>
+          {selectedMonths.length > 0 && (
+            <Button onClick={() => setSelectedMonths([])}>Cancel</Button>
+          )}
+        </Space>
       </Space>
     </Card>
   )

@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from apps.masterdata.models import BrandUploadConfig, DimBrand
 
 from . import storage
-from .loader import DataAlterationNotPermitted, delete_by_filter, preview_delete
+from .loader import DataAlterationNotPermitted, delete_by_filter, months_with_data, preview_delete
 from .models import UploadBatch
 from .permissions import DjangoModelPermissionsIncludingView
 from .serializers import UploadBatchSerializer
@@ -44,7 +44,7 @@ DELETE_REQUEST_SERIALIZER = inline_serializer(
         "brand_code": serializers.CharField(help_text="e.g. KILLER, PEPE"),
         "product_line": serializers.CharField(help_text="e.g. menswear"),
         "financial_year": serializers.CharField(help_text="e.g. 25-26"),
-        "month": serializers.IntegerField(help_text="1-12"),
+        "months": serializers.CharField(help_text="comma-separated, 1-12, e.g. 1,2,3"),
     },
 )
 
@@ -65,51 +65,99 @@ DELETE_RESPONSE_SERIALIZER = inline_serializer(
     "DeleteDataResponse", {"deleted_count": serializers.IntegerField()}
 )
 
+MONTHS_WITH_DATA_RESPONSE_SERIALIZER = inline_serializer(
+    "MonthsWithDataResponse",
+    {
+        "months": inline_serializer(
+            "MonthWithData",
+            {
+                "month_no": serializers.IntegerField(),
+                "month_name": serializers.CharField(),
+                "row_count": serializers.IntegerField(),
+                "quantity": serializers.IntegerField(),
+            },
+            many=True,
+        ),
+    },
+)
 
-def _resolve_delete_target(params):
-    """Shared brand/product_line/financial_year/month resolution +
-    validation for the Delete Data preview and delete endpoints -- both
-    must scope to the exact same target, so they share one resolver rather
-    than parsing independently and risking the two drifting apart.
 
-    Returns (target, None) on success, where target is
-    (brand, product_line, financial_year, month_no), or (None, error_response)
-    on a request-shape problem.
-    """
+def _parse_months(months_raw: str):
+    """comma-separated month numbers -> a validated list[int], or an error
+    Response. Shared by the months-with-data, preview, and delete views so
+    "1,2,3" is parsed identically everywhere."""
+    months = []
+    for part in months_raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            month_no = int(part)
+        except ValueError:
+            return None, Response(
+                {"detail": f"months must be comma-separated integers 1-12, got {part!r}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= month_no <= 12:
+            return None, Response(
+                {"detail": f"months must be comma-separated integers 1-12, got {month_no}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        months.append(month_no)
+    if not months:
+        return None, Response(
+            {"detail": "months is required (comma-separated, at least one)"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return months, None
+
+
+def _resolve_brand_config_and_year(params):
+    """brand_code + product_line + financial_year resolution shared by
+    every Delete Data endpoint. Returns ((brand, product_line,
+    financial_year), None) on success, or (None, error_response) on a
+    request-shape problem."""
     brand_code = params.get("brand_code", "")
     product_line = params.get("product_line", "")
     financial_year = params.get("financial_year", "")
-    month_raw = params.get("month", "")
 
-    if not brand_code or not product_line or not financial_year or not month_raw:
+    if not brand_code or not product_line or not financial_year:
         return None, Response(
-            {"detail": "brand_code, product_line, financial_year and month are all required"},
+            {"detail": "brand_code, product_line and financial_year are all required"},
             status=status.HTTP_400_BAD_REQUEST,
         )
-
     if not FINANCIAL_YEAR_RE.match(financial_year):
         return None, Response(
             {"detail": f"financial_year must look like '25-26', got '{financial_year}'"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    try:
-        month_no = int(month_raw)
-    except (TypeError, ValueError):
-        return None, Response(
-            {"detail": f"month must be an integer 1-12, got '{month_raw}'"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if not 1 <= month_no <= 12:
-        return None, Response(
-            {"detail": f"month must be an integer 1-12, got {month_no}"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
     brand = get_object_or_404(DimBrand, brand_code=brand_code.upper(), active=True)
     get_object_or_404(BrandUploadConfig, brand=brand, product_line=product_line, active=True)
 
-    return (brand, product_line, financial_year, month_no), None
+    return (brand, product_line, financial_year), None
+
+
+def _resolve_delete_target(params):
+    """Shared brand/product_line/financial_year/months resolution +
+    validation for the Delete Data preview and delete endpoints -- both
+    must scope to the exact same target, so they share one resolver rather
+    than parsing independently and risking the two drifting apart.
+
+    Returns (target, None) on success, where target is
+    (brand, product_line, financial_year, months), or (None, error_response)
+    on a request-shape problem.
+    """
+    resolved, error = _resolve_brand_config_and_year(params)
+    if error:
+        return None, error
+    brand, product_line, financial_year = resolved
+
+    months, error = _parse_months(params.get("months", ""))
+    if error:
+        return None, error
+
+    return (brand, product_line, financial_year, months), None
 
 
 def _intake_upload(request):
@@ -268,12 +316,52 @@ class ErrorReportDownloadView(APIView):
         return response
 
 
+class MonthsWithDataView(APIView):
+    """Every month within one brand + product_line + financial_year that
+    has data, with its row count and quantity -- powers the Delete Data
+    page's month checklist. Read-only, same permission as the preview
+    endpoint below."""
+
+    queryset = UploadBatch.objects.all()
+    permission_classes = [DjangoModelPermissionsIncludingView]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("brand_code", str),
+            OpenApiParameter("product_line", str),
+            OpenApiParameter("financial_year", str, description="e.g. 25-26"),
+        ],
+        responses=MONTHS_WITH_DATA_RESPONSE_SERIALIZER,
+    )
+    def get(self, request):
+        resolved, error = _resolve_brand_config_and_year(request.query_params)
+        if error:
+            return error
+        brand, product_line, financial_year = resolved
+
+        months = months_with_data(brand, product_line, financial_year)
+        return Response(
+            {
+                "months": [
+                    {
+                        "month_no": m["date__month_no"],
+                        "month_name": m["date__month_name"],
+                        "row_count": m["row_count"],
+                        "quantity": m["quantity"],
+                    }
+                    for m in months
+                ]
+            }
+        )
+
+
 class DeletePreviewView(APIView):
     """Read-only summary (row count, store count, total net value, date
-    range) of what a Delete Data request would remove -- powers the
-    confirmation dialog's preview. Never alters anything, so never audited
-    (ADR-0003 audits alterations, not reads); still requires authentication
-    and view-level permission, same as every other endpoint here.
+    range) of what a Delete Data request would remove, combined across
+    every month selected -- powers the confirmation dialog's preview.
+    Never alters anything, so never audited (ADR-0003 audits alterations,
+    not reads); still requires authentication and view-level permission,
+    same as every other endpoint here.
     """
 
     queryset = UploadBatch.objects.all()
@@ -284,7 +372,7 @@ class DeletePreviewView(APIView):
             OpenApiParameter("brand_code", str),
             OpenApiParameter("product_line", str),
             OpenApiParameter("financial_year", str, description="e.g. 25-26"),
-            OpenApiParameter("month", int, description="1-12"),
+            OpenApiParameter("months", str, description="comma-separated, 1-12, e.g. 1,2,3"),
         ],
         responses=DELETE_PREVIEW_RESPONSE_SERIALIZER,
     )
@@ -292,9 +380,9 @@ class DeletePreviewView(APIView):
         target, error = _resolve_delete_target(request.query_params)
         if error:
             return error
-        brand, product_line, financial_year, month_no = target
+        brand, product_line, financial_year, months = target
 
-        preview = preview_delete(brand, product_line, financial_year, month_no)
+        preview = preview_delete(brand, product_line, financial_year, months)
         return Response(
             {
                 "row_count": preview["row_count"],
@@ -308,8 +396,8 @@ class DeletePreviewView(APIView):
 
 class DeleteDataView(APIView):
     """Deletes every fact_sales row for one brand + product_line +
-    financial_year + month (the Delete Data page), across however many
-    upload batches loaded into that slice.
+    financial_year + one or more months (the Delete Data page), across
+    however many upload batches loaded into those slices.
 
     Gated and audited exactly like batch rollback (ADR-0003):
     `delete_by_filter` itself decides allow/block and writes the audit
@@ -326,22 +414,22 @@ class DeleteDataView(APIView):
         target, error = _resolve_delete_target(request.data)
         if error:
             return error
-        brand, product_line, financial_year, month_no = target
+        brand, product_line, financial_year, months = target
 
         try:
             deleted_count = delete_by_filter(
-                brand, product_line, financial_year, month_no, request.user
+                brand, product_line, financial_year, months, request.user
             )
         except DataAlterationNotPermitted as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
 
         logger.info(
-            "user %s deleted %s fact_sales row(s) for %s/%s FY%s month=%s",
+            "user %s deleted %s fact_sales row(s) for %s/%s FY%s months=%s",
             request.user.email,
             deleted_count,
             brand.brand_code,
             product_line,
             financial_year,
-            month_no,
+            months,
         )
         return Response({"deleted_count": deleted_count})

@@ -342,12 +342,30 @@ def rollback_batch(batch, user) -> int:
     return deleted
 
 
-def _deletable_queryset(brand, product_line: str, financial_year: str, month_no: int):
+def months_with_data(brand, product_line: str, financial_year: str) -> list[dict]:
+    """Every month within one brand + product_line + financial_year that
+    actually has data, with its row count and total quantity -- powers the
+    Delete Data page's month checklist (client feedback: pick a brand and
+    year, see every month with data and how much, tick however many to
+    delete in one pass, not one month at a time)."""
+    return list(
+        FactSales.objects.filter(
+            brand=brand,
+            date__financial_year=financial_year,
+            batch__config__product_line=product_line,
+        )
+        .values("date__month_no", "date__month_name")
+        .annotate(row_count=Count("sale_id"), quantity=Sum("quantity"))
+        .order_by("date__month_no")
+    )
+
+
+def _deletable_queryset(brand, product_line: str, financial_year: str, months: list[int]):
     """The exact rows a Delete Data request (brand + product_line +
-    financial_year + month) would remove. Shared by preview_delete and
-    delete_by_filter so the two can never drift apart -- the count/preview
-    the admin confirms against is guaranteed to be the same set actually
-    deleted.
+    financial_year + one or more months) would remove. Shared by
+    preview_delete and delete_by_filter so the two can never drift apart --
+    the count/preview the admin confirms against is guaranteed to be the
+    same set actually deleted.
 
     Scoped by product_line via batch -> config, not a direct fact_sales
     column (product_line only exists on BrandUploadConfig). Rows with no
@@ -359,16 +377,16 @@ def _deletable_queryset(brand, product_line: str, financial_year: str, month_no:
     return FactSales.objects.filter(
         brand=brand,
         date__financial_year=financial_year,
-        date__month_no=month_no,
+        date__month_no__in=months,
         batch__config__product_line=product_line,
     )
 
 
-def preview_delete(brand, product_line: str, financial_year: str, month_no: int) -> dict:
+def preview_delete(brand, product_line: str, financial_year: str, months: list[int]) -> dict:
     """Read-only summary of what a Delete Data request would remove --
     never audited (nothing is altered by looking), just authorization-gated
     at the view layer."""
-    return _deletable_queryset(brand, product_line, financial_year, month_no).aggregate(
+    return _deletable_queryset(brand, product_line, financial_year, months).aggregate(
         row_count=Count("sale_id"),
         store_count=Count("store_id", distinct=True),
         total_net_value=Sum("net_value"),
@@ -377,19 +395,21 @@ def preview_delete(brand, product_line: str, financial_year: str, month_no: int)
     )
 
 
-def delete_by_filter(brand, product_line: str, financial_year: str, month_no: int, user) -> int:
+def delete_by_filter(brand, product_line: str, financial_year: str, months: list[int], user) -> int:
     """Deletes every fact_sales row for one brand + product_line +
-    financial_year + month, across however many upload batches loaded into
-    that slice. Gated and audited exactly like rollback_batch (ADR-0003) --
-    the only difference is the selection criteria (a filter, not a single
-    batch), so it reuses the same permission, audit action family, and
-    post-delete refresh/cache-bust steps.
+    financial_year + one or more months, across however many upload batches
+    loaded into those slices. Gated and audited exactly like rollback_batch
+    (ADR-0003) -- the only difference is the selection criteria (a filter,
+    not a single batch), so it reuses the same permission, audit action
+    family, and post-delete refresh/cache-bust steps. One audit record per
+    request regardless of how many months were selected -- one user action,
+    one entry, same convention as the original single-month version.
     """
-    existing_count = _deletable_queryset(brand, product_line, financial_year, month_no).count()
+    existing_count = _deletable_queryset(brand, product_line, financial_year, months).count()
     details = {
         "product_line": product_line,
         "financial_year": financial_year,
-        "month_no": month_no,
+        "months": months,
         "row_count": existing_count,
     }
     if existing_count > 0:
@@ -413,10 +433,10 @@ def delete_by_filter(brand, product_line: str, financial_year: str, month_no: in
                   AND ub.config_id = buc.config_id
                   AND fs.brand_id = %s
                   AND dc.financial_year = %s
-                  AND dc.month_no = %s
+                  AND dc.month_no = ANY(%s)
                   AND buc.product_line = %s
                 """,
-                [brand.brand_id, financial_year, month_no, product_line],
+                [brand.brand_id, financial_year, months, product_line],
             )
             deleted = cursor.rowcount
 
