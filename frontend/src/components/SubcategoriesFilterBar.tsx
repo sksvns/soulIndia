@@ -19,7 +19,7 @@ const MONTH_OPTIONS = [
   'December',
 ].map((name, i) => ({ label: name, value: i + 1 }))
 
-const EMPTY_OPTIONS: SubcategoryFilterOptions = { financial_years: [], stores: [] }
+const EMPTY_OPTIONS: SubcategoryFilterOptions = { financial_years: [], stores: [], genders: [] }
 
 interface SubcategoriesFilterBarProps {
   brands: Brand[]
@@ -101,6 +101,15 @@ export function SubcategoriesFilterBar({
         value={filters.store}
         onChange={(v) => onFilterChange('store', v)}
         options={options.stores.map((name) => ({ label: name, value: name }))}
+      />
+      <Select
+        style={{ width: 150 }}
+        placeholder="Gender (all)"
+        allowClear
+        loading={optionsLoading}
+        value={filters.gender}
+        onChange={(v) => onFilterChange('gender', v)}
+        options={options.genders.map((g) => ({ label: g, value: g }))}
       />
       {activeCount > 0 && (
         <Button icon={<ClearOutlined />} onClick={onClear}>

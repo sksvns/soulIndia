@@ -10,7 +10,12 @@ from apps.ingestion.models import UploadBatch
 from apps.ingestion.pipeline import run_pipeline
 from apps.ingestion.tasks import process_upload_batch
 from apps.masterdata.models import BrandUploadConfig, DimBrand
-from tests.ingestion_fixtures import KILLER_GOOD_ROWS, killer_workbook
+from tests.ingestion_fixtures import (
+    KILLER_GOOD_ROWS,
+    PEPE_GOOD_ROWS,
+    killer_workbook,
+    pepe_workbook,
+)
 
 
 @pytest.fixture
@@ -35,6 +40,42 @@ def loaded_killer_data(killer_brand_and_config, data_inserter_user):
         object_key="uploads/killer/menswear/test.xlsx",
     )
     result = run_pipeline(brand, config, killer_workbook(KILLER_GOOD_ROWS), "test.xlsx")
+    load_batch(batch, result.rows)
+    refresh_all()
+    return brand
+
+
+@pytest.fixture
+def loaded_gender_trend_data(seed_calendar, data_inserter_user):
+    """Killer never supplies gender (0/47712 real products) -- Pepe does
+    (100% coverage), so gender-filter endpoint tests use Pepe with two
+    distinct-barcode rows for MENS/LADIES variance."""
+    from apps.analytics.materialized_views import refresh_all
+
+    call_command("seed_brands", stdout=StringIO())
+    call_command("seed_upload_configs", stdout=StringIO())
+    brand = DimBrand.objects.get(brand_code="PEPE")
+    config = BrandUploadConfig.objects.get(brand=brand)
+
+    rows = [
+        {**PEPE_GOOD_ROWS[0], "GENDER": "MENS"},
+        {
+            **PEPE_GOOD_ROWS[0],
+            "BillNo": "PRHO26-79722",
+            "STOCKNo": 9999999999903,
+            "GENDER": "LADIES",
+            "COLOR": "PINK",
+        },
+    ]
+    batch = UploadBatch.objects.create(
+        brand=brand,
+        config=config,
+        uploaded_by=data_inserter_user,
+        file_name="gender_trend.xlsx",
+        object_key="uploads/pepe/menswear/gender_trend.xlsx",
+    )
+    result = run_pipeline(brand, config, pepe_workbook(rows), "gender_trend.xlsx")
+    assert result.ok, result.errors
     load_batch(batch, result.rows)
     refresh_all()
     return brand
@@ -225,6 +266,28 @@ def test_categories_filter_options_endpoint_returns_real_distinct_values(
     assert response.status_code == 200
     assert response.data["financial_years"] == ["23-24"]
     assert response.data["stores"] == ["AADARSH ENTERPRISES - DUMRAO"]
+    assert response.data["genders"] == []  # Killer supplies no gender at all
+
+
+@pytest.mark.django_db
+def test_categories_filter_options_and_ranking_respect_gender_over_http(
+    loaded_gender_trend_data, data_inserter_user
+):
+    client = _authed_client(data_inserter_user)
+
+    options_response = client.get(
+        "/api/analytics/categories/filter-options/", {"brand_code": "PEPE"}
+    )
+    assert options_response.status_code == 200
+    assert options_response.data["genders"] == ["LADIES", "MENS"]
+
+    ranking_response = client.get(
+        "/api/analytics/categories/", {"brand_code": "PEPE", "gender": "LADIES"}
+    )
+    assert ranking_response.status_code == 200
+    results = ranking_response.data["results"]
+    assert len(results) == 1
+    assert results[0]["quantity"] == 1
 
 
 @pytest.mark.django_db

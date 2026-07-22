@@ -19,7 +19,12 @@ const MONTH_OPTIONS = [
   'December',
 ].map((name, i) => ({ label: name, value: i + 1 }))
 
-const EMPTY_OPTIONS: SizeFilterOptions = { financial_years: [], stores: [], categories: [] }
+const EMPTY_OPTIONS: SizeFilterOptions = {
+  financial_years: [],
+  stores: [],
+  categories: [],
+  genders: [],
+}
 
 interface SizesFilterBarProps {
   brands: Brand[]
@@ -110,6 +115,15 @@ export function SizesFilterBar({
         value={filters.category}
         onChange={(v) => onFilterChange('category', v)}
         options={options.categories.map((c) => ({ label: c, value: c }))}
+      />
+      <Select
+        style={{ width: 150 }}
+        placeholder="Gender (all)"
+        allowClear
+        loading={optionsLoading}
+        value={filters.gender}
+        onChange={(v) => onFilterChange('gender', v)}
+        options={options.genders.map((g) => ({ label: g, value: g }))}
       />
       {activeCount > 0 && (
         <Button icon={<ClearOutlined />} onClick={onClear}>

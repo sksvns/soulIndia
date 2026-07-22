@@ -19,7 +19,9 @@ optional like the rest of these.
 color/size are now supported too (mv_color_perf/mv_size_perf, migration
 0005), and fit as of migration 0006 -- article_code remains deliberately
 unsupported for the same cardinality reasons migration 0002 originally
-gave for all four.
+gave for all four. gender was added to mv_color_perf/mv_size_perf/
+mv_fit_perf in migration 0007 (client feedback); mv_category_perf and
+dashboard_category_perf already had it from the start.
 """
 
 MV_COLUMNS = {
@@ -70,10 +72,14 @@ MV_COLUMNS = {
     # regular filter (not the view's own grouping dimension), letting the
     # Color/Size pages narrow to one category the same way brand narrows
     # from "all brands" (client feedback).
+    # gender added in migration 0007 (client feedback) -- genuinely sparse
+    # in real data (only Pepe supplies it), same situation Kraus is
+    # already in for sub_category/fit.
     "mv_color_perf": {
         "store": "store_name",
         "category": "category",
         "color": "color",
+        "gender": "gender",
         "financial_year": "financial_year",
         "month": "month_no",
     },
@@ -81,6 +87,7 @@ MV_COLUMNS = {
         "store": "store_name",
         "category": "category",
         "size": "size",
+        "gender": "gender",
         "financial_year": "financial_year",
         "month": "month_no",
     },
@@ -90,6 +97,7 @@ MV_COLUMNS = {
         "store": "store_name",
         "category": "category",
         "fit": "fit",
+        "gender": "gender",
         "financial_year": "financial_year",
         "month": "month_no",
     },

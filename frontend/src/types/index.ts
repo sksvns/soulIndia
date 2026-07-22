@@ -145,6 +145,7 @@ export interface CategoryRankingResponse {
 export interface CategoryFilterOptions {
   financial_years: string[]
   stores: string[]
+  genders: string[]
 }
 
 export interface CategoryChartRow extends Totals {
@@ -187,6 +188,7 @@ export interface SubcategoryRankingResponse {
 export interface SubcategoryFilterOptions {
   financial_years: string[]
   stores: string[]
+  genders: string[]
 }
 
 export interface SubcategoryChartRow extends Totals {
@@ -226,6 +228,7 @@ export interface ColorFilterOptions {
   financial_years: string[]
   stores: string[]
   categories: string[]
+  genders: string[]
 }
 
 export interface ColorChartRow extends Totals {
@@ -263,6 +266,7 @@ export interface SizeFilterOptions {
   financial_years: string[]
   stores: string[]
   categories: string[]
+  genders: string[]
 }
 
 export interface SizeChartRow extends Totals {
@@ -303,6 +307,7 @@ export interface FitFilterOptions {
   financial_years: string[]
   stores: string[]
   categories: string[]
+  genders: string[]
 }
 
 export interface FitChartRow extends Totals {

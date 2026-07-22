@@ -339,10 +339,13 @@ def category_ranking(
 
 
 def category_filter_options(brand_ids: list[int]) -> dict:
-    """Distinct financial years and store names actually present, for the
-    Categories page's own filter bar (brand/year/month/store -- client
-    feedback, same convention as the Dashboard's). Stores are listed by
-    name, deduped across brands, matching dashboard_filter_options."""
+    """Distinct financial years, store names, and genders actually present,
+    for the Categories page's own filter bar (brand/year/month/store/gender
+    -- client feedback, same convention as the Dashboard's). Stores are
+    listed by name, deduped across brands, matching dashboard_filter_options.
+    Gender is genuinely brand-dependent -- only Pepe supplies it today
+    (Killer/Junior Killer/Kraus don't), so this list is often empty or
+    single-brand, same situation Kraus is already in for sub_category/fit."""
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT DISTINCT financial_year FROM mv_category_perf "
@@ -358,7 +361,14 @@ def category_filter_options(brand_ids: list[int]) -> dict:
         )
         stores = [row[0] for row in cursor.fetchall()]
 
-    return {"financial_years": financial_years, "stores": stores}
+        cursor.execute(
+            "SELECT DISTINCT gender FROM mv_category_perf "
+            "WHERE brand_id = ANY(%s) AND gender IS NOT NULL ORDER BY gender",
+            [brand_ids],
+        )
+        genders = [row[0] for row in cursor.fetchall()]
+
+    return {"financial_years": financial_years, "stores": stores, "genders": genders}
 
 
 _ZERO_BREAKDOWN = {
@@ -618,10 +628,10 @@ def subcategory_ranking(
 
 
 def subcategory_filter_options(brand_ids: list[int]) -> dict:
-    """Distinct financial years and store names, same convention as
-    category_filter_options (client feedback: Subcategory keeps the exact
-    same brand/year/month/store filter set as Categories, no extra
-    Category filter)."""
+    """Distinct financial years, store names, and genders, same convention
+    as category_filter_options (client feedback: Subcategory keeps the
+    exact same brand/year/month/store/gender filter set as Categories, no
+    extra Category filter)."""
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT DISTINCT financial_year FROM mv_category_perf "
@@ -637,7 +647,14 @@ def subcategory_filter_options(brand_ids: list[int]) -> dict:
         )
         stores = [row[0] for row in cursor.fetchall()]
 
-    return {"financial_years": financial_years, "stores": stores}
+        cursor.execute(
+            "SELECT DISTINCT gender FROM mv_category_perf "
+            "WHERE brand_id = ANY(%s) AND gender IS NOT NULL ORDER BY gender",
+            [brand_ids],
+        )
+        genders = [row[0] for row in cursor.fetchall()]
+
+    return {"financial_years": financial_years, "stores": stores, "genders": genders}
 
 
 def subcategory_line_chart(brand_ids: list[int], filters: dict, subcategories: list[str]) -> dict:
@@ -895,7 +912,19 @@ def color_filter_options(brand_ids: list[int]) -> dict:
         )
         categories = [row[0] for row in cursor.fetchall()]
 
-    return {"financial_years": financial_years, "stores": stores, "categories": categories}
+        cursor.execute(
+            "SELECT DISTINCT gender FROM mv_color_perf "
+            "WHERE brand_id = ANY(%s) AND gender IS NOT NULL ORDER BY gender",
+            [brand_ids],
+        )
+        genders = [row[0] for row in cursor.fetchall()]
+
+    return {
+        "financial_years": financial_years,
+        "stores": stores,
+        "categories": categories,
+        "genders": genders,
+    }
 
 
 def color_line_chart(brand_ids: list[int], filters: dict, colors: list[str]) -> dict:
@@ -1140,7 +1169,19 @@ def size_filter_options(brand_ids: list[int]) -> dict:
         )
         categories = [row[0] for row in cursor.fetchall()]
 
-    return {"financial_years": financial_years, "stores": stores, "categories": categories}
+        cursor.execute(
+            "SELECT DISTINCT gender FROM mv_size_perf "
+            "WHERE brand_id = ANY(%s) AND gender IS NOT NULL ORDER BY gender",
+            [brand_ids],
+        )
+        genders = [row[0] for row in cursor.fetchall()]
+
+    return {
+        "financial_years": financial_years,
+        "stores": stores,
+        "categories": categories,
+        "genders": genders,
+    }
 
 
 def size_line_chart(brand_ids: list[int], filters: dict, sizes: list[str]) -> dict:
@@ -1386,7 +1427,19 @@ def fit_filter_options(brand_ids: list[int]) -> dict:
         )
         categories = [row[0] for row in cursor.fetchall()]
 
-    return {"financial_years": financial_years, "stores": stores, "categories": categories}
+        cursor.execute(
+            "SELECT DISTINCT gender FROM mv_fit_perf "
+            "WHERE brand_id = ANY(%s) AND gender IS NOT NULL ORDER BY gender",
+            [brand_ids],
+        )
+        genders = [row[0] for row in cursor.fetchall()]
+
+    return {
+        "financial_years": financial_years,
+        "stores": stores,
+        "categories": categories,
+        "genders": genders,
+    }
 
 
 def fit_line_chart(brand_ids: list[int], filters: dict, fits: list[str]) -> dict:
