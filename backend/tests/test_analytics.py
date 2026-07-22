@@ -971,6 +971,116 @@ def test_fit_ranking_excludes_brands_with_no_fit_data(loaded_killer_data):
     assert queries.fit_ranking([kraus.brand_id]) == []
 
 
+# --- Gender filter (client feedback) -------------------------------------
+# Killer never supplies gender at all (0/47712 real products), so every
+# gender test below uses Pepe instead, the one brand that does (100%
+# coverage). Two distinct-barcode rows give MENS/LADIES variance that
+# neither PEPE_GOOD_ROWS nor KILLER_GOOD_ROWS has on its own.
+
+
+@pytest.fixture
+def loaded_gender_trend_data(seed_calendar, data_inserter_user):
+    from apps.ingestion.models import UploadBatch
+
+    call_command("seed_brands", stdout=StringIO())
+    call_command("seed_upload_configs", stdout=StringIO())
+    brand = DimBrand.objects.get(brand_code="PEPE")
+    config = BrandUploadConfig.objects.get(brand=brand)
+
+    rows = [
+        {**PEPE_GOOD_ROWS[0], "GENDER": "MENS"},  # STOCKNo 8905875293118
+        {
+            **PEPE_GOOD_ROWS[0],
+            "BillNo": "PRHO26-79722",
+            "STOCKNo": 9999999999903,  # distinct barcode -- own dim_product row
+            "GENDER": "LADIES",
+            "COLOR": "PINK",
+            "Size": "S",
+            "FIT": "SLIM",
+        },
+    ]
+    batch = UploadBatch.objects.create(
+        brand=brand,
+        config=config,
+        uploaded_by=data_inserter_user,
+        file_name="gender_trend.xlsx",
+        object_key="uploads/pepe/menswear/gender_trend.xlsx",
+    )
+    result = run_pipeline(brand, config, pepe_workbook(rows), "gender_trend.xlsx")
+    assert result.ok, result.errors
+    load_batch(batch, result.rows)
+    refresh_all()
+    return brand
+
+
+@pytest.mark.django_db
+def test_category_filter_options_and_ranking_include_gender(loaded_gender_trend_data):
+    brand = loaded_gender_trend_data
+
+    options = queries.category_filter_options([brand.brand_id])
+    assert options["genders"] == ["LADIES", "MENS"]
+
+    all_results = queries.category_ranking([brand.brand_id])
+    assert {r["category"] for r in all_results} == {"TOP WEAR"}  # Pepe's GEN - CAT -> category
+
+    mens_only = queries.category_ranking([brand.brand_id], {"gender": "MENS"})
+    assert len(mens_only) == 1
+    assert mens_only[0]["quantity"] == 1  # only the MENS row's unit
+
+
+@pytest.mark.django_db
+def test_subcategory_filter_options_include_gender(loaded_gender_trend_data):
+    brand = loaded_gender_trend_data
+
+    assert queries.subcategory_filter_options([brand.brand_id])["genders"] == ["LADIES", "MENS"]
+
+
+@pytest.mark.django_db
+def test_color_filter_options_and_ranking_respect_gender(loaded_gender_trend_data):
+    brand = loaded_gender_trend_data
+
+    options = queries.color_filter_options([brand.brand_id])
+    assert options["genders"] == ["LADIES", "MENS"]
+
+    ladies_only = queries.color_ranking([brand.brand_id], {"gender": "LADIES"})
+    assert {r["color"] for r in ladies_only} == {"PINK"}
+
+
+@pytest.mark.django_db
+def test_size_filter_options_and_ranking_respect_gender(loaded_gender_trend_data):
+    brand = loaded_gender_trend_data
+
+    options = queries.size_filter_options([brand.brand_id])
+    assert options["genders"] == ["LADIES", "MENS"]
+
+    mens_only = queries.size_ranking([brand.brand_id], {"gender": "MENS"})
+    assert {r["size"] for r in mens_only} == {"M"}
+
+
+@pytest.mark.django_db
+def test_fit_filter_options_and_ranking_respect_gender(loaded_gender_trend_data):
+    brand = loaded_gender_trend_data
+
+    options = queries.fit_filter_options([brand.brand_id])
+    assert options["genders"] == ["LADIES", "MENS"]
+
+    ladies_only = queries.fit_ranking([brand.brand_id], {"gender": "LADIES"})
+    assert {r["fit"] for r in ladies_only} == {"SLIM"}
+
+
+@pytest.mark.django_db
+def test_gender_filter_options_are_empty_for_a_brand_with_no_gender_data(loaded_killer_data):
+    """Killer supplies no gender at all -- every one of the five filter-
+    options endpoints must return an empty list, not an error."""
+    brand = loaded_killer_data
+
+    assert queries.category_filter_options([brand.brand_id])["genders"] == []
+    assert queries.subcategory_filter_options([brand.brand_id])["genders"] == []
+    assert queries.color_filter_options([brand.brand_id])["genders"] == []
+    assert queries.size_filter_options([brand.brand_id])["genders"] == []
+    assert queries.fit_filter_options([brand.brand_id])["genders"] == []
+
+
 @pytest.mark.django_db
 def test_cache_get_or_compute_is_a_miss_then_a_hit(loaded_killer_data):
     brand = loaded_killer_data
