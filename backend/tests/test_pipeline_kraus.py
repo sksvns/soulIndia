@@ -114,6 +114,34 @@ def test_kraus_store_name_casing_inconsistency_still_resolves_to_one_store(
 
 
 @pytest.mark.django_db
+def test_kraus_swapped_store_columns_resolve_to_the_same_real_store(kraus_brand_and_config):
+    """Some real Kraus exports (confirmed 2026-09-12) put the KRA-x tier
+    code under STORE NAME instead of STORE CODE, with an unrelated,
+    non-identifying per-row reference number in STORE CODE. Without
+    apply_store_identity_overrides, this would fracture one real store
+    (KRA-3/THE BOMBAY FASHION) into a fake one per distinct reference
+    number -- it must resolve to the exact same DimStore as a normally-
+    shaped row for KRA-3."""
+    brand, config = kraus_brand_and_config
+    swapped_row = {
+        **KRAUS_GOOD_ROWS[0],
+        "INVOICE NO": 55001,
+        "STORE NAME": "KRA-3",
+        "STORE CODE": "0202-0016039",
+    }
+    workbook = kraus_workbook([swapped_row])
+
+    result = run_pipeline(brand, config, workbook, "kraus_swapped.xlsx")
+
+    assert result.ok, result.errors
+    row = result.rows[0]
+    assert row["store_code"] == "KRA-3"
+    assert row["store_name"] == "THE BOMBAY FASHION"
+    assert DimStore.objects.filter(brand=brand, store_code="0202-0016039").exists() is False
+    assert DimStore.objects.get(brand=brand, store_code="KRA-3").store_name == "THE BOMBAY FASHION"
+
+
+@pytest.mark.django_db
 def test_kraus_bad_file_fails_with_precise_actionable_errors(kraus_brand_and_config):
     brand, config = kraus_brand_and_config
     workbook = kraus_workbook(KRAUS_BAD_ROWS)

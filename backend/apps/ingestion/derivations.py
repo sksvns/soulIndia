@@ -63,6 +63,31 @@ def unit_mrp_from_mrp_and_quantity(row: dict) -> Decimal | None:
     return abs(mrp_value / quantity)
 
 
+def apply_store_identity_overrides(canonical_row: dict, validation_rules: dict) -> dict:
+    """Corrects store_code/store_name for brands whose export swaps which
+    raw column holds the true, durable per-store code between different
+    files -- Kraus confirmed 2026-09-12: it has exactly 3 real stores
+    (KRA-1/PANKH, KRA-2/DAFTARI TEXTILES PVT LTD, KRA-3/THE BOMBAY
+    FASHION), but some of its exports put the KRA-x code under STORE NAME
+    instead of STORE CODE, with an unrelated per-row reference number in
+    the other column. Whichever of the two mapped values matches a known
+    code in store_identity_overrides, that becomes store_code and the
+    config's name for it becomes store_name -- regardless of which raw
+    column either value was originally mapped from. Mutates and returns
+    canonical_row."""
+    overrides = validation_rules.get("store_identity_overrides")
+    if not overrides:
+        return canonical_row
+
+    code, name = canonical_row.get("store_code"), canonical_row.get("store_name")
+    if code in overrides:
+        canonical_row["store_name"] = overrides[code]
+    elif name in overrides:
+        canonical_row["store_code"] = name
+        canonical_row["store_name"] = overrides[name]
+    return canonical_row
+
+
 def apply_derived_fields(canonical_row: dict, validation_rules: dict) -> dict:
     """Fills in any field declared under validation_rules.derived_fields that
     the brand didn't supply directly. Mutates and returns canonical_row."""

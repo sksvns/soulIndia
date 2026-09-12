@@ -37,6 +37,11 @@
       }
     },
     "is_return_when": "quantity < 0 OR mrp_value < 0 (verified against the real file: all 24 return rows have both quantity and mrp_value negative together, never just one -- no inconsistent-sign rows found)",
+    "store_identity_overrides": {
+      "KRA-1": "PANKH",
+      "KRA-2": "DAFTARI TEXTILES PVT LTD",
+      "KRA-3": "THE BOMBAY FASHION"
+    },
     "notes": [
       "This file has TWO sheets -- 'REPORT' (an 8-row pivot summary) and 'SALE REPORT' (the real 718-row transaction detail). sheet_name is set explicitly to 'SALE REPORT': the sheet-name-fallback (falls back to sheet index 0 if the configured name isn't found) would otherwise silently land on 'REPORT' instead, ingesting an 8-row pivot summary rather than the 718 real transactions.",
       "This is a YTD (year-to-date) export -- one file's MONTH column spans January through June 2026 (6 distinct months, verified), not a single month like every other brand's routine upload. Operational consequence worth the client being aware of: since fact_sales replace is scoped by (store, month) slice (ADR-0002), every future YTD upload will re-touch every prior month's slice, which by then already has data -- so ADR-0003's alter_existing_data gate (Super Admin) will fire on every routine Kraus upload from here on, not just genuine corrections, unlike every other brand's single-month day-to-day upload.",
@@ -45,9 +50,9 @@
       "category, store_name and color (SHADE) are NOT in required_canonical_fields here, unlike the original mapping (which required category and store_name) -- the real file has a small number of genuinely blank cells for category (2/718) and color (4/718) with no sensible default, and this now matches the same required-field baseline used by Killer/Pepe/Junior Killer/Pepe Kids rather than the original mapping's one-off deviation from it.",
       "No supplied discount-percentage column exists in this file at all (unlike the original mapping's TOTAL DISCOUNT PCT, or Pepe's WAD) -- the discount-percent sanity cross-check only runs if a supplied value is present (apps.ingestion.validation), so this is simply omitted rather than needing a placeholder.",
       "EAN CODE has trailing non-breaking-space padding on a meaningful minority of rows (191/718, e.g. '8905747548711\\xa0\\xa0\\xa0...') -- confirmed the existing barcode caster's str.strip() already strips \\xa0 along with ordinary whitespace, so this needed no code change, just verification that it was actually handled.",
-      "STORE NAME has an inconsistent-casing duplicate ('PANKH' vs 'Pankh', same STORE CODE 'KRA-1') -- confirmed harmless: store identity resolves by STORE CODE alone (apps.ingestion.dimension_resolver.resolve_stores), and store_name is one of row_mapper's TEXT_DIMENSION_FIELDS, uppercased unconditionally regardless of this config -- both variants normalize to the same 'PANKH' before a store row is ever created.",
+      "STORE NAME has an inconsistent-casing duplicate ('PANKH' vs 'Pankh', same STORE CODE 'KRA-1') -- confirmed harmless: store_name is one of row_mapper's TEXT_DIMENSION_FIELDS, uppercased unconditionally regardless of this config -- both variants normalize to the same 'PANKH' before a store row is ever created.",
       "INVOICE NO is mixed int/str in the raw file (382/336 rows respectively), same convention as Pepe's BillNo and Killer's Bill No -- always cast to string, never numeric.",
-      "This one file shows 3 distinct (STORE CODE, STORE NAME) identities: KRA-1/PANKH, KRA-2/DAFTARI TEXTILES PVT LTD, KRA-3/THE BOMBAY FASHION -- Kraus appears to sell through a small reseller/distributor network rather than only its own stores."
+      "CORRECTED 2026-09-12 (client confirmed): Kraus has exactly 3 real stores total -- KRA-1/PANKH, KRA-2/DAFTARI TEXTILES PVT LTD, KRA-3/THE BOMBAY FASHION. The original YTD sample file above happened to have STORE NAME=real name / STORE CODE=KRA-x for all rows, so store identity was assumed to resolve by STORE CODE alone. But subsequent real exports (e.g. 'KRAUS - SALE REPORT JAN 26 TO AUG 26.xlsx') swap this per row: STORE NAME holds the KRA-x tier code and STORE CODE holds an unrelated, non-identifying per-row reference number (not a 4th+ store) -- so taking STORE CODE at face value there fractured one real store into hundreds of fake ones. store_identity_overrides (above) is the fix: apps.ingestion.derivations.apply_store_identity_overrides checks BOTH mapped values against this table after column mapping and normalizes store_code/store_name to the correct pair regardless of which raw column the KRA-x value came from."
     ]
   }
 }
