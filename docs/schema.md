@@ -249,8 +249,26 @@ stated format.
 | 2 | CORRECTED DATE | `sale_date` (clean, 100%-populated datetime on every row -- the name and consistency both point to this being the client's own reconciled date) |
 | 3 | MONTH | `month` (trusted-as-supplied, numeric `1`-`6` in the sample; captured to `extra` for audit like every other brand's `month`, never used to drive real date logic) |
 | 4 | INVOICE NO | `invoice_no` (mixed int/str in the raw file, same as Pepe's BillNo/Killer's Bill No -- always cast to string) |
-| 5 | STORE NAME | `store_name` (one real inconsistency found: `"PANKH"` vs `"Pankh"` for the same `STORE CODE` -- harmless, since store identity resolves by `STORE CODE` alone and `store_name` is uppercased unconditionally for every brand) |
-| 6 | STORE CODE | `store_code` (3 distinct stores in the sample file: `KRA-1`/PANKH, `KRA-2`/DAFTARI TEXTILES PVT LTD, `KRA-3`/THE BOMBAY FASHION -- Kraus appears to sell through a small reseller network) |
+| 5 | STORE NAME | `store_name` (one real inconsistency found: `"PANKH"` vs `"Pankh"` for the same `STORE CODE` -- harmless, `store_name` is uppercased unconditionally for every brand) |
+| 6 | STORE CODE | `store_code` |
+
+**CORRECTED 2026-09-12 (client confirmed):** Kraus has exactly 3 real
+stores total -- `KRA-1`/PANKH, `KRA-2`/DAFTARI TEXTILES PVT LTD,
+`KRA-3`/THE BOMBAY FASHION. The YTD sample file above happened to have
+STORE NAME=real name / STORE CODE=KRA-x for every row, so store identity
+was assumed to resolve by STORE CODE alone. But later real exports (e.g.
+"KRAUS - SALE REPORT JAN 26 TO AUG 26.xlsx") swap this per row: STORE
+NAME holds the KRA-x code and STORE CODE holds an unrelated, non-
+identifying per-row reference number -- taking STORE CODE at face value
+there fractured one real store into hundreds of fake ones (confirmed:
+938 fake `DimStore` rows in production before the fix). Fixed by
+`store_identity_overrides` in `kraus_womenswear.json`'s
+`validation_rules` + `apps.ingestion.derivations.
+apply_store_identity_overrides`, which checks both mapped values against
+the known (code, name) pairs and normalizes regardless of which raw
+column the KRA-x value came from. Already-ingested fake rows were merged
+into the 3 real ones via the one-time `fix_kraus_store_identity`
+management command.
 | 7 | EAN CODE | `barcode` (~27% of rows have trailing non-breaking-space padding, e.g. `"8905747548711\xa0\xa0\xa0"` -- the existing barcode caster's `str.strip()` already removes `\xa0`, confirmed, no code change needed) |
 | 8 | BRAND | `extra` (redundant with upload context, always `"KRAUS"`) |
 | 9 | ITEM NAME | `article_code` (the per-SKU code, e.g. `LFA-2106`) |

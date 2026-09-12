@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from . import dimension_resolver, parsing, row_mapper
 from .column_resolver import resolve_columns
-from .derivations import apply_derived_fields
+from .derivations import apply_derived_fields, apply_store_identity_overrides
 from .validation import IngestionError, validate_rows
 
 CHUNK_SIZE = 100_000
@@ -73,6 +73,7 @@ def parse_map_validate(brand, config, fileobj, filename: str) -> ParsedRows:
             canonical["_coercion_errors"] = coercion_errors
             canonical["extra"] = extra
             canonical = apply_derived_fields(canonical, config.validation_rules)
+            canonical = apply_store_identity_overrides(canonical, config.validation_rules)
             if canonical.get("quantity") is not None:
                 mrp_value = canonical.get("mrp_value")
                 # A return can also show up as a positive quantity with a
