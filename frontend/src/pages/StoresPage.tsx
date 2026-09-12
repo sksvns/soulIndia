@@ -24,12 +24,23 @@ const PAGE_SIZE_OPTIONS: { label: string; value: PageSize }[] = [
   { label: 'All', value: 'all' },
 ]
 
+// Kraus's own export puts a distributor/tier code (KRA-1/KRA-2/KRA-3) in
+// the raw "STORE NAME" column for most of its stores -- only a handful of
+// legacy stores were ever given a real name there. Fall back to the store
+// code for those so the column stays distinguishable per store, rather
+// than repeating the same unhelpful label hundreds of times.
+const NON_DISTINGUISHING_STORE_NAMES = new Set(['KRA-1', 'KRA-2', 'KRA-3'])
+
 // No column-level sorter here, deliberately: sorting is entirely
 // server-side over the complete result (the "Order by" control below),
 // never a client-side re-sort of whichever page happens to be loaded
 // (client feedback).
 const columns: ColumnsType<StorePerfRow> = [
-  { title: 'Store', dataIndex: 'store_name' },
+  {
+    title: 'Store',
+    dataIndex: 'store_name',
+    render: (name: string, row) => (NON_DISTINGUISHING_STORE_NAMES.has(name) ? row.store_code : name),
+  },
   { title: 'Code', dataIndex: 'store_code' },
   { title: 'City', dataIndex: 'city' },
   { title: 'Zone', dataIndex: 'zone' },
